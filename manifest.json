@@ -1,0 +1,9 @@
+{
+	"id": "obsidian-ugreen-sync",
+	"name": "UGREEN NAS Sync",
+	"version": "1.0.0",
+	"minAppVersion": "1.0.0",
+	"description": "Minimal two-way vault sync for UGREEN NAS.",
+	"author": "tsfreddie",
+	"isDesktopOnly": false
+}
