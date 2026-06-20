@@ -1,7 +1,10 @@
 {
+  "plugin": {
+    "name": "UGREEN 绿联云同步"
+  },
   "status": {
     "checking": "检查中",
-    "loggedOut": "已登出",
+    "loggedOut": "未登录",
     "syncPathNeeded": "需设置同步路径",
     "syncing": "同步中",
     "failed": "失败",
@@ -15,9 +18,9 @@
     "manualSyncRequired": "需要手动同步",
     "manualSyncRequiredDetail": "保留两个版本后自动同步已暂停",
     "synced": "已同步",
-    "ugreenSync": "UGREEN 同步",
-    "ugreenSyncStatus": "UGREEN 同步：{{status}}",
-    "openMenu": "{{status}}。打开 UGREEN 同步菜单"
+    "ugreenSync": "绿联云同步",
+    "ugreenSyncStatus": "绿联云同步：{{status}}",
+    "openMenu": "{{status}}。打开绿联云同步菜单"
   },
   "sync": {
     "uploaded": "已上传 {{count}} 个文件",
@@ -27,28 +30,28 @@
     "conflict": "{{count}} 个冲突",
     "conflicts": "{{count}} 个冲突",
     "alreadySynced": "{{vaultName}} 已是最新状态。",
-    "syncFailed": "UGREEN 同步失败：{{error}}"
+    "syncFailed": "绿联云同步失败：{{error}}"
   },
   "notice": {
-    "signInBeforeSync": "同步前请先登录 UGREEN NAS。",
-    "signInBeforeConflicts": "解决冲突前请先登录 UGREEN NAS。",
-    "loggedOut": "已登出 UGREEN NAS。",
-    "sessionCheckFailed": "UGREEN NAS 会话检查失败：{{error}}",
+    "signInBeforeSync": "同步前请先登录绿联云。",
+    "signInBeforeConflicts": "解决冲突前请先登录绿联云。",
+    "loggedOut": "已登出绿联云。",
+    "sessionCheckFailed": "绿联云会话检查失败：{{error}}",
     "autoSyncPreconditions": "启用自动同步前请先登录并设置 NAS 同步目录。",
     "checkNasAccessFailed": "无法检查 NAS 同步目录访问权限：{{error}}",
     "autoSyncDisabled": "为防止更改设置时数据损坏，自动同步已关闭",
-    "couldNotOpenSettings": "无法打开 UGREEN 同步设置。",
-    "signInSucceeded": "UGREEN NAS 登录成功。",
-    "resetHistory": "UGREEN 同步历史已重置。文件未被删除。",
+    "couldNotOpenSettings": "无法打开绿联云同步设置。",
+    "signInSucceeded": "绿联云登录成功。",
+    "resetHistory": "绿联云同步历史已重置。文件未被删除。",
     "couldNotOpenBrowser": "无法打开 NAS 浏览器：{{error}}",
-    "noConflicts": "未找到未解决的 UGREEN 同步冲突。",
-    "conflictsResolved": "已解决 {{count}} 个 UGREEN 同步冲突文件。"
+    "noConflicts": "未找到未解决的绿联云同步冲突。",
+    "conflictsResolved": "已解决 {{count}} 个绿联云同步冲突文件。"
   },
   "command": {
     "syncNow": "立即同步"
   },
   "menu": {
-    "banner": "UGREEN NAS 同步",
+    "banner": "绿联云同步",
     "heading": "同步状态",
     "syncNow": "立即同步",
     "resolveConflicts": "解决冲突",
@@ -103,17 +106,17 @@
     "resetHistoryLine3": "任何内容差异将被视为冲突并保存到 .conflicts 文件夹。",
     "cancel": "取消",
     "resetHistory": "重置历史",
-    "logoutTitle": "登出 UGREEN NAS",
+    "logoutTitle": "登出绿联云",
     "logoutLine1": "您将被登出，会话将被清除。",
     "logoutLine2": "自动同步和任何待处理的同步操作将被取消。同步前您需要重新登录。",
     "logOut": "登出"
   },
   "login": {
-    "title": "登录 UGREEN NAS",
+    "title": "登录绿联云",
     "titleOtp": "输入验证码",
-    "httpWarning": "文件可能对同一网络上的其他人可见。仅在受信任的网络上使用 HTTP。推荐使用 UGREENlink。",
+    "httpWarning": "使用HTTP协议可能会暴露您的文件数据给同一网络上的其他人。请仅在受信任的网络上使用 HTTP。通常来说推荐使用 UGREENlink。",
     "connectionType": "连接类型",
-    "connectionTypeDesc": "选择连接到 UGREEN NAS 的方式。",
+    "connectionTypeDesc": "选择连接到绿联云 的方式。",
     "protocolUgreenlink": "UGREENlink",
     "protocolHttps": "HTTPS",
     "protocolHttp": "HTTP",
@@ -141,11 +144,11 @@
     "nasAddressRequired": "请输入 NAS 地址。",
     "usernameRequired": "请输入用户名。",
     "passwordRequired": "请输入密码。",
-    "loginFailed": "UGREEN NAS 登录失败"
+    "loginFailed": "绿联云登录失败"
   },
   "conflicts": {
     "title": "解决同步冲突",
-    "conflictPromptLine1": "UGREEN 同步无法在 .conflicts 中有残留文件时继续进行。",
+    "conflictPromptLine1": "绿联云同步无法在 .conflicts 中有残留文件时继续进行。",
     "conflictPromptLine2": "是否立即解决？",
     "cancelSync": "取消同步",
     "resolveNow": "立即解决",
@@ -195,16 +198,16 @@
     "selectedPath": "已选路径：{{path}}"
   },
   "error": {
-    "signInBeforeSync": "同步前请先登录 UGREEN NAS。",
-    "sessionExpired": "UGREEN NAS 会话已过期。请重新登录后再同步。",
-    "noAccessibleRoots": "UGREEN NAS 未报告任何可访问的根文件夹。",
+    "signInBeforeSync": "同步前请先登录绿联云。",
+    "sessionExpired": "绿联云会话已过期。请重新登录后再同步。",
+    "noAccessibleRoots": "绿联云未报告任何可访问的根文件夹。",
     "useBrowseToChoose": "请使用浏览功能选择可访问的 NAS 同步目录。",
     "nasSyncDirRequired": "需要设置 NAS 同步目录。",
     "uploadVerificationFailed": "远程上传验证失败 {{localPath}}：预期 {{expected}} 字节，收到 {{actual}} 字节。",
     "pathOutsideSyncDir": "远程路径超出同步目录范围：{{path}}",
     "connectionRequired": "需要填写 NAS 地址或 UGREENlink ID。",
     "unsupportedRequestBody": "不支持的请求体类型。",
-    "ugreenApiError": "UGREEN API 错误 {{code}}",
+    "ugreenApiError": "绿联云 API 错误 {{code}}",
     "httpError": "HTTP {{status}} {{statusText}}",
     "unresolvedConflicts": ".conflicts 中存在未解决的同步冲突。请先解决冲突后再同步。"
   }

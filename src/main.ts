@@ -58,6 +58,7 @@ export default class UgreenSyncPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		setLocale(detectLocale(getLanguage()));
+		this.manifest.name = t('plugin.name');
 
 		this.statusBarItem = this.addStatusBarItem();
 		this.statusBarItem.addClass('ugreen-sync-status-bar');
@@ -99,14 +100,17 @@ export default class UgreenSyncPlugin extends Plugin {
 			name: t('command.syncNow'),
 			checkCallback: (checking) => {
 				if (
-					!this.isSignedIn() ||
 					this.settings.autoSyncManualBlockReason === 'nas-dir-changed'
 				) {
 					return false;
 				}
 
 				if (!checking) {
-					void this.syncNow();
+					if (this.isSignedIn()) {
+						void this.syncNow();
+					} else {
+						void this.signIn();
+					}
 				}
 
 				return true;
@@ -936,13 +940,16 @@ this.setSignedInIdleStatus(t('status.loggedIn'));
 			item.setTitle(t('menu.syncNow'))
 				.setIcon('sync')
 				.setDisabled(
-					!this.isSignedIn() ||
-						this.settings.autoSyncManualBlockReason ===
-							'nas-dir-changed' ||
+					this.settings.autoSyncManualBlockReason ===
+						'nas-dir-changed' ||
 						this.syncInProgress,
 				)
 				.onClick(() => {
-					void this.syncNow();
+					if (this.isSignedIn()) {
+						void this.syncNow();
+					} else {
+						void this.signIn();
+					}
 				});
 		});
 		if (isConflictStatus(this.latestStatus)) {

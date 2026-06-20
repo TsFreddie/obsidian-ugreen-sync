@@ -1,7 +1,10 @@
 {
+  "plugin": {
+    "name": "UGREEN NAS Sync"
+  },
   "status": {
     "checking": "Checking",
-    "loggedOut": "Logged out",
+    "loggedOut": "Not logged in",
     "syncPathNeeded": "Sync path needed",
     "syncing": "Syncing",
     "failed": "Failed",
