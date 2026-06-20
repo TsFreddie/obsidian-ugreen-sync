@@ -9,6 +9,12 @@ type UgreenClientSettings = Pick<UgreenSyncSettings, 'url' | 'ugreenLinkId'>;
 type UgosLoginFailureResult = Extract<UgosLoginResult, { success: false; requiresCode: false }>;
 
 const UGOS_FOLDER_ALREADY_EXISTS = 1327;
+
+const remoteFolderCache = new Set<string>();
+
+export function clearRemoteFolderCache(): void {
+	remoteFolderCache.clear();
+}
 const FORBIDDEN_REQUEST_HEADERS = new Set([
 	'connection',
 	'content-length',
@@ -463,9 +469,14 @@ async function mkdirIfMissing(
 	settings: UgreenSyncSettings,
 	remotePath: string,
 ): Promise<void> {
+	if (remoteFolderCache.has(remotePath)) {
+		return;
+	}
+
 	debugLog(settings, 'remote folder exists check', { path: remotePath });
 	if (await client.exists(remotePath)) {
 		debugLog(settings, 'remote folder exists', { path: remotePath });
+		remoteFolderCache.add(remotePath);
 		return;
 	}
 
@@ -474,6 +485,7 @@ async function mkdirIfMissing(
 	try {
 		await client.mkdir(remotePath, options.recursive);
 		debugLog(settings, 'remote folder create complete', { path: remotePath, options });
+		remoteFolderCache.add(remotePath);
 	} catch (error) {
 		if (
 			error instanceof UgosApiError &&
@@ -481,6 +493,7 @@ async function mkdirIfMissing(
 			(await client.exists(remotePath))
 		) {
 			debugLog(settings, 'remote folder create already exists', { path: remotePath, options });
+			remoteFolderCache.add(remotePath);
 			return;
 		}
 		throw error;

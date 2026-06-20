@@ -1,5 +1,6 @@
 import { Vault } from 'obsidian';
 import {
+	clearRemoteFolderCache,
 	downloadRemoteFile,
 	listRemoteFiles,
 	prepareUgreenClient,
@@ -23,6 +24,7 @@ export async function runSync(
 	onProgress?: (progress: SyncProgress) => void,
 ): Promise<SyncResult> {
 	await ensureNoUnresolvedConflicts(vault);
+	clearRemoteFolderCache();
 	const jobSettings: UgreenSyncSettings = {
 		...settings,
 		remoteBaseDir: settings.remoteBaseDir,

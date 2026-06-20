@@ -1,6 +1,7 @@
 import {
 	Menu,
 	Notice,
+	Platform,
 	Plugin,
 	setIcon,
 	type App,
@@ -44,6 +45,9 @@ export default class UgreenSyncPlugin extends Plugin {
 	private statusIconEl?: HTMLElement;
 	private statusIconName?: IconName;
 	private statusProgressEl?: HTMLElement;
+	private drawerStatusEl?: HTMLElement;
+	private drawerStatusIconEl?: HTMLElement;
+	private drawerStatusIconName?: IconName;
 	private latestStatus: SyncStatus = { label: 'Checking', kind: 'running' };
 	private syncInProgress = false;
 	private syncPromise?: Promise<boolean>;
@@ -70,6 +74,13 @@ export default class UgreenSyncPlugin extends Plugin {
 			this.showStatusMenuAtStatusBar();
 		});
 		this.setStatus({ label: 'Checking', kind: 'running' });
+
+		if (Platform.isMobile) {
+			this.app.workspace.onLayoutReady(() =>
+				this.injectDrawerStatus(),
+			);
+		}
+
 		void this.checkLoginOnLaunch();
 		void this.updateConflictStatus();
 		this.app.workspace.onLayoutReady(() =>
@@ -86,7 +97,11 @@ export default class UgreenSyncPlugin extends Plugin {
 			id: 'sync-now',
 			name: 'Sync now',
 			checkCallback: (checking) => {
-				if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
+				if (
+					!this.isSignedIn() ||
+					!this.hasRemoteBaseDir() ||
+					this.settings.autoSyncManualBlockReason === 'nas-dir-changed'
+				) {
 					return false;
 				}
 
@@ -102,7 +117,10 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.addSettingTab(this.settingTab);
 	}
 
-	onunload() {}
+	onunload() {
+		this.drawerStatusEl?.remove();
+		this.drawerStatusEl = undefined;
+	}
 
 	async syncNow(options: SyncNowOptions = {}): Promise<boolean> {
 		if (this.syncPromise !== undefined) {
@@ -142,6 +160,11 @@ export default class UgreenSyncPlugin extends Plugin {
 			return false;
 		}
 
+		if (this.settings.autoSyncManualBlockReason === 'nas-dir-changed') {
+			this.setAutoSyncManualBlockStatus();
+			return false;
+		}
+
 		if (!(await this.ensureSignedIn(allowLoginPrompt))) {
 			this.setStatus({ label: 'Logged out', kind: 'warning' });
 			return false;
@@ -157,7 +180,6 @@ export default class UgreenSyncPlugin extends Plugin {
 			return false;
 		}
 
-		const remoteBaseDir = this.settings.remoteBaseDir;
 		try {
 			if (clearAutoSyncManualBlock) {
 				await this.clearAutoSyncManualBlock();
@@ -176,22 +198,10 @@ export default class UgreenSyncPlugin extends Plugin {
 					});
 				},
 			);
-			if (this.settings.remoteBaseDir !== remoteBaseDir) {
-				this.setStatus({
-					label: 'NAS directory changed',
-					kind: 'warning',
-				});
-				if (showInfoNotices) {
-					new Notice(
-						'NAS sync directory changed during sync. Sync history was not updated.',
-						8000,
-					);
-				}
-				return false;
-			}
 
 			this.settings.syncState = result.syncState;
 			this.settings.lastSyncAt = Date.now();
+			this.settings.lastSyncRemoteDir = this.settings.remoteBaseDir;
 			this.updatePendingChangesFromSyncState(result.syncState);
 			await this.saveSettings();
 
@@ -201,6 +211,7 @@ export default class UgreenSyncPlugin extends Plugin {
 					formatSyncSuccessNotice(result, this.app.vault.getName()),
 				);
 			}
+			this.settingTab?.refreshAfterSync();
 			return true;
 		} catch (error) {
 			const errorMessage = formatUgreenError(error);
@@ -227,6 +238,11 @@ export default class UgreenSyncPlugin extends Plugin {
 		if (!this.hasRemoteBaseDir()) {
 			this.setStatus({ label: 'No NAS directory', kind: 'warning' });
 			new Notice('Set a NAS sync directory before resolving conflicts.');
+			return;
+		}
+
+		if (this.settings.autoSyncManualBlockReason === 'nas-dir-changed') {
+			this.setAutoSyncManualBlockStatus();
 			return;
 		}
 
@@ -351,14 +367,57 @@ export default class UgreenSyncPlugin extends Plugin {
 		return this.settings.remoteBaseDir.trim() !== '';
 	}
 
+	private hasSyncHistory(): boolean {
+		return (
+			Object.keys(this.settings.syncState).length > 0 ||
+			this.settings.lastSyncAt > 0
+		);
+	}
+
+	async clearSyncHistory(): Promise<void> {
+		this.settings.syncState = {};
+		this.settings.lastSyncAt = 0;
+		this.settings.lastSyncRemoteDir = '';
+		this.settings.autoSyncManualBlockReason = undefined;
+		this.settings.hasPendingChanges = false;
+		this.settings.lastLocalChangeAt = 0;
+		await this.saveSettings();
+	}
+
 	async setRemoteBaseDir(remoteBaseDir: string): Promise<void> {
 		if (this.settings.remoteBaseDir === remoteBaseDir) {
 			return;
 		}
 
+		const hadSyncHistory = this.hasSyncHistory();
+		const isRestoringPreviousDir =
+			hadSyncHistory &&
+			this.settings.lastSyncRemoteDir !== '' &&
+			remoteBaseDir === this.settings.lastSyncRemoteDir;
+
 		this.settings.remoteBaseDir = remoteBaseDir;
+
+		if (isRestoringPreviousDir) {
+			this.settings.autoSyncManualBlockReason = undefined;
+			this.disableAutoSyncForSafety();
+			await this.saveSettings();
+			this.configureAutoSyncInterval();
+			this.setSignedInIdleStatus('Ready');
+			return;
+		}
+
+		if (hadSyncHistory) {
+			this.settings.autoSyncManualBlockReason = 'nas-dir-changed';
+			this.disableAutoSyncForSafety();
+			await this.saveSettings();
+			this.configureAutoSyncInterval();
+			this.setAutoSyncManualBlockStatus();
+			return;
+		}
+
 		this.settings.syncState = {};
 		this.settings.lastSyncAt = 0;
+		this.settings.lastSyncRemoteDir = '';
 		this.settings.autoSyncManualBlockReason = undefined;
 		this.settings.hasPendingChanges = false;
 		this.settings.lastLocalChangeAt = 0;
@@ -380,7 +439,7 @@ export default class UgreenSyncPlugin extends Plugin {
 			normalizeAutoSyncIntervalMinutes(
 				this.settings.autoSyncIntervalMinutes,
 			);
-		if (!enabled) {
+		if (!enabled && this.settings.autoSyncManualBlockReason === 'keep-both-conflict-resolution') {
 			this.settings.autoSyncManualBlockReason = undefined;
 		}
 		await this.saveSettings();
@@ -436,6 +495,7 @@ export default class UgreenSyncPlugin extends Plugin {
 				debugLogging: savedData.debugLogging,
 				syncState: savedData.syncState,
 				lastSyncAt: savedData.lastSyncAt,
+				lastSyncRemoteDir: savedData.lastSyncRemoteDir,
 			}).filter(([, value]) => value !== undefined),
 		) as Partial<UgreenSyncSettings>;
 		if (savedSettings.autoSyncIntervalMinutes !== undefined) {
@@ -463,6 +523,7 @@ export default class UgreenSyncPlugin extends Plugin {
 			debugLogging: this.settings.debugLogging,
 			syncState: this.settings.syncState,
 			lastSyncAt: this.settings.lastSyncAt,
+			lastSyncRemoteDir: this.settings.lastSyncRemoteDir,
 		});
 	}
 
@@ -481,7 +542,7 @@ export default class UgreenSyncPlugin extends Plugin {
 	private registerAutoSyncLifecycleHandlers(): void {
 		this.registerEvent(
 			this.app.workspace.on('quit', (tasks) => {
-				if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
+				if (!this.isSignedIn() || !this.hasRemoteBaseDir() || !this.settings.autoSyncEnabled) {
 					return;
 				}
 				debugLog(this.settings, 'quit sync trigger');
@@ -507,7 +568,7 @@ export default class UgreenSyncPlugin extends Plugin {
 			}
 		});
 		this.registerDomEvent(activeWindow, 'pagehide', () => {
-			if (!this.settings.hasPendingChanges) {
+			if (!this.settings.autoSyncEnabled || !this.settings.hasPendingChanges) {
 				return;
 			}
 			void this.syncNow({
@@ -664,6 +725,11 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private setSignedInIdleStatus(label: string): void {
+		if (this.settings.autoSyncManualBlockReason === 'nas-dir-changed') {
+			this.setAutoSyncManualBlockStatus();
+			return;
+		}
+
 		if (this.hasAutoSyncManualBlock()) {
 			this.setAutoSyncManualBlockStatus();
 			return;
@@ -712,6 +778,8 @@ export default class UgreenSyncPlugin extends Plugin {
 			`${statusText}. Open UGREEN sync menu`,
 		);
 		this.statusBarItem.setAttribute('title', statusText);
+
+		this.updateDrawerStatus(statusIcon, statusText, statusClass);
 	}
 
 	private updateStatusIcon(
@@ -752,6 +820,68 @@ export default class UgreenSyncPlugin extends Plugin {
 		}
 	}
 
+	private injectDrawerStatus(): void {
+		const header = activeDocument.querySelector(
+			'.workspace-drawer.mod-right .workspace-drawer-header',
+		);
+		if (header === null) {
+			return;
+		}
+
+		this.drawerStatusEl = activeDocument.createElement('button');
+		this.drawerStatusEl.addClass(
+			'clickable-icon',
+			'workspace-drawer-header-icon',
+			'mod-raised',
+			'ugreen-sync-drawer-button',
+		);
+		this.drawerStatusEl.setAttribute('aria-label', 'UGREEN sync');
+		setIcon(this.drawerStatusEl, 'sync');
+		this.drawerStatusIconEl = this.drawerStatusEl;
+		this.drawerStatusIconName = 'sync';
+		this.registerDomEvent(this.drawerStatusEl, 'click', (event) => {
+			this.showStatusMenu(event);
+		});
+		header.append(this.drawerStatusEl);
+	}
+
+	private updateDrawerStatus(
+		iconName: IconName,
+		statusText: string,
+		statusClass: string,
+	): void {
+		if (this.drawerStatusEl === undefined) {
+			return;
+		}
+
+		if (this.drawerStatusIconName !== iconName) {
+			this.drawerStatusEl.empty();
+			setIcon(this.drawerStatusEl, iconName);
+			this.drawerStatusIconName = iconName;
+		}
+
+		this.drawerStatusEl.toggleClass(
+			'ugreen-sync-status-running',
+			statusClass === 'ugreen-sync-status-running',
+		);
+		this.drawerStatusEl.toggleClass(
+			'ugreen-sync-status-warning',
+			statusClass === 'ugreen-sync-status-warning',
+		);
+		this.drawerStatusEl.toggleClass(
+			'ugreen-sync-status-success',
+			statusClass === 'ugreen-sync-status-success',
+		);
+		this.drawerStatusEl.toggleClass(
+			'ugreen-sync-conflict-status',
+			statusClass === 'ugreen-sync-conflict-status',
+		);
+		this.drawerStatusEl.setAttribute(
+			'aria-label',
+			`UGREEN sync: ${statusText}`,
+		);
+	}
+
 	private showStatusMenu(event: MouseEvent): void {
 		const menu = new Menu();
 
@@ -768,6 +898,8 @@ export default class UgreenSyncPlugin extends Plugin {
 				.setDisabled(
 					!this.isSignedIn() ||
 						!this.hasRemoteBaseDir() ||
+						this.settings.autoSyncManualBlockReason ===
+							'nas-dir-changed' ||
 						this.syncInProgress,
 				)
 				.onClick(() => {
@@ -801,7 +933,7 @@ export default class UgreenSyncPlugin extends Plugin {
 
 		const bannerEl = activeDocument.createElement('div');
 		bannerEl.addClass('ugreen-sync-menu-status-banner');
-		bannerEl.setText('UGREEN NAS Sync');
+		bannerEl.setText('UGREEN NAS sync');
 		statusEl.append(bannerEl);
 
 		const headingEl = activeDocument.createElement('div');
@@ -894,6 +1026,8 @@ export default class UgreenSyncPlugin extends Plugin {
 		const conflictStatus = createConflictStatus(conflictCount);
 		if (conflictCount > 0) {
 			this.setStatus(conflictStatus);
+		} else if (this.settings.autoSyncManualBlockReason === 'nas-dir-changed') {
+			this.setAutoSyncManualBlockStatus();
 		} else if (this.hasAutoSyncManualBlock()) {
 			this.setAutoSyncManualBlockStatus();
 		} else if (isConflictStatus(this.latestStatus)) {
@@ -904,7 +1038,10 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private async blockAutoSyncUntilManualSync(): Promise<void> {
-		if (!this.settings.autoSyncEnabled) {
+		if (
+			!this.settings.autoSyncEnabled ||
+			this.settings.autoSyncManualBlockReason === 'nas-dir-changed'
+		) {
 			return;
 		}
 
@@ -915,7 +1052,10 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private async clearAutoSyncManualBlock(): Promise<void> {
-		if (!this.hasAutoSyncManualBlock()) {
+		if (
+			this.settings.autoSyncManualBlockReason !==
+			'keep-both-conflict-resolution'
+		) {
 			return;
 		}
 
@@ -931,6 +1071,17 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private setAutoSyncManualBlockStatus(): void {
+		if (this.settings.autoSyncManualBlockReason === 'nas-dir-changed') {
+			this.setStatus({
+				label: 'NAS directory changed',
+				details: [
+					'Sync is blocked. Restore the previous directory path or reset sync history in settings.',
+				],
+				kind: 'blocked',
+			});
+			return;
+		}
+
 		this.setStatus({
 			label: 'Manual sync required',
 			details: ['Auto-sync paused after keep both conflict resolution'],

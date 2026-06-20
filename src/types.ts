@@ -14,9 +14,12 @@ export interface UgreenSyncSettings {
 	debugLogging: boolean;
 	syncState: Record<string, SyncStateEntry>;
 	lastSyncAt: number;
+	lastSyncRemoteDir: string;
 }
 
-export type AutoSyncManualBlockReason = 'keep-both-conflict-resolution';
+export type AutoSyncManualBlockReason =
+	| 'keep-both-conflict-resolution'
+	| 'nas-dir-changed';
 
 export interface SyncStateEntry {
 	localMtime: number;
@@ -39,6 +42,7 @@ export const DEFAULT_SETTINGS: UgreenSyncSettings = {
 	debugLogging: false,
 	syncState: {},
 	lastSyncAt: 0,
+	lastSyncRemoteDir: '',
 };
 
 export interface LocalFileMeta {

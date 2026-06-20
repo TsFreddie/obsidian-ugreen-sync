@@ -56,6 +56,22 @@
 	color: var(--text-accent);
 }
 
+.ugreen-sync-drawer-button.ugreen-sync-status-running .svg-icon {
+	animation: ugreen-sync-spin 1.1s linear infinite;
+}
+
+.ugreen-sync-drawer-button.ugreen-sync-conflict-status {
+	color: var(--text-error);
+}
+
+.ugreen-sync-drawer-button.ugreen-sync-status-warning {
+	color: var(--text-warning);
+}
+
+.ugreen-sync-drawer-button.ugreen-sync-status-success {
+	color: var(--text-accent);
+}
+
 .menu-item[data-section="ugreen-sync-status"] .menu-item-icon {
 	display: none;
 }
@@ -107,6 +123,10 @@
 
 .ugreen-sync-setting-message.is-hidden {
 	display: none;
+}
+
+.ugreen-sync-reset-history-modal {
+	width: min(92vw, 480px);
 }
 
 .ugreen-sync-modal-actions {
