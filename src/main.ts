@@ -1,7 +1,7 @@
-import { Notice, Plugin } from 'obsidian';
+import { Menu, Notice, Plugin, setIcon, type App, type IconName } from 'obsidian';
 import { openUgreenLoginModal } from './login';
 import { UgreenSyncSettingTab } from './settings';
-import { DEFAULT_SETTINGS, UgreenSyncSettings } from './types';
+import { DEFAULT_SETTINGS, SyncProgress, SyncResult, UgreenSyncSettings } from './types';
 import { runSync } from './sync';
 import { formatUgreenError, getRemoteBaseDirAccessError, hasValidUgreenSession, logUgreenError } from './ugreen';
 import { hasUnresolvedConflicts, openConflictPrompt, openConflictResolver } from './conflicts';
@@ -10,27 +10,31 @@ import { debugLog } from './debug';
 export default class UgreenSyncPlugin extends Plugin {
 	settings!: UgreenSyncSettings;
 	private statusBarItem?: HTMLElement;
-	private ribbonIcon?: HTMLElement;
+	private statusIconEl?: HTMLElement;
+	private statusIconName?: IconName;
+	private statusProgressEl?: HTMLElement;
+	private latestStatus: SyncStatus = { label: 'Checking', kind: 'running' };
 	private syncInProgress = false;
 
 	async onload() {
 		await this.loadSettings();
 
-		this.ribbonIcon = this.addRibbonIcon('sync', 'Sync with UGREEN NAS', () => {
-			if (!this.isSignedIn()) {
-				new Notice('Sign in to UGREEN NAS before syncing.');
-				return;
-			}
-			if (!this.hasRemoteBaseDir()) {
-				new Notice('Set a NAS sync directory before syncing.');
-				return;
-			}
-
-			void this.syncNow();
-		});
-
 		this.statusBarItem = this.addStatusBarItem();
-		this.setStatus('UGREEN sync checking sign-in...');
+		this.statusBarItem.addClass('ugreen-sync-status-bar');
+		this.statusBarItem.setAttribute('role', 'button');
+		this.statusBarItem.setAttribute('tabindex', '0');
+		this.registerDomEvent(this.statusBarItem, 'click', (event) => {
+			this.showStatusMenu(event);
+		});
+		this.registerDomEvent(this.statusBarItem, 'keydown', (event) => {
+			if (event.key !== 'Enter' && event.key !== ' ') {
+				return;
+			}
+
+			event.preventDefault();
+			this.showStatusMenuAtStatusBar();
+		});
+		this.setStatus({ label: 'Checking', kind: 'running' });
 		void this.checkLoginOnLaunch();
 		void this.updateConflictStatus();
 		this.registerEvent(this.app.vault.on('create', () => void this.updateConflictStatus()));
@@ -53,41 +57,17 @@ export default class UgreenSyncPlugin extends Plugin {
 			},
 		});
 
-		this.addCommand({
-			id: 'resolve-conflicts',
-			name: 'Resolve sync conflicts',
-			checkCallback: (checking) => {
-				if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
-					return false;
-				}
-
-				if (!checking) {
-					void this.resolveConflicts();
-				}
-
-				return true;
-			},
-		});
-
-		this.addCommand({
-			id: 'test-connection',
-			name: 'Sign in to UGREEN NAS',
-			callback: () => {
-				void this.signIn();
-			},
-		});
-
 		this.addSettingTab(new UgreenSyncSettingTab(this.app, this));
 	}
 
 	async syncNow() {
 		if (!this.isSignedIn()) {
-			this.setStatus('UGREEN sync needs sign-in');
+			this.setStatus({ label: 'Logged out', kind: 'warning' });
 			new Notice('Sign in to UGREEN NAS before syncing.');
 			return;
 		}
 		if (!this.hasRemoteBaseDir()) {
-			this.setStatus('UGREEN sync needs NAS directory');
+			this.setStatus({ label: 'No NAS directory', kind: 'warning' });
 			new Notice('Set a NAS sync directory before syncing.');
 			return;
 		}
@@ -98,7 +78,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		}
 
 		if (!(await this.ensureSignedIn())) {
-			this.setStatus('UGREEN sync needs sign-in');
+			this.setStatus({ label: 'Logged out', kind: 'warning' });
 			return;
 		}
 
@@ -112,21 +92,26 @@ export default class UgreenSyncPlugin extends Plugin {
 
 		try {
 			this.syncInProgress = true;
-			this.setStatus('UGREEN sync running...');
+			this.setStatus({ label: 'Syncing', kind: 'running' });
 
-			const result = await runSync(this.app.vault, this.settings);
+			const result = await runSync(this.app.vault, this.settings, (progress) => {
+				this.setStatus({
+					label: 'Syncing',
+					kind: 'running',
+					progress: getSyncProgressPercent(progress),
+				});
+			});
 			this.settings.syncState = result.syncState;
 			this.settings.lastSyncAt = Date.now();
 			await this.saveSettings();
 
-			const message = `UGREEN sync complete: ${result.uploaded} uploaded, ${result.downloaded} downloaded, ${result.deletedLocal} local deleted, ${result.deletedRemote} remote deleted, ${result.conflicts} conflicts.`;
-			this.setStatus(message);
-			new Notice(message);
+			this.setStatus(formatSyncStatusMessage(result));
+			new Notice(formatSyncSuccessNotice(result, this.app.vault.getName()));
 		} catch (error) {
-			const message = `UGREEN sync failed: ${formatUgreenError(error)}`;
+			const errorMessage = formatUgreenError(error);
 			logUgreenError('sync failed', error);
-			this.setStatus(message);
-			new Notice(message, 8000);
+			this.setStatus({ label: 'Failed', details: [errorMessage], kind: 'error' });
+			new Notice(`UGREEN sync failed: ${errorMessage}`, 8000);
 		} finally {
 			this.syncInProgress = false;
 			void this.updateConflictStatus();
@@ -135,12 +120,12 @@ export default class UgreenSyncPlugin extends Plugin {
 
 	async resolveConflicts() {
 		if (!this.isSignedIn()) {
-			this.setStatus('UGREEN sync needs sign-in');
+			this.setStatus({ label: 'Logged out', kind: 'warning' });
 			new Notice('Sign in to UGREEN NAS before resolving conflicts.');
 			return;
 		}
 		if (!this.hasRemoteBaseDir()) {
-			this.setStatus('UGREEN sync needs NAS directory');
+			this.setStatus({ label: 'No NAS directory', kind: 'warning' });
 			new Notice('Set a NAS sync directory before resolving conflicts.');
 			return;
 		}
@@ -161,7 +146,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.settings.username = result.username;
 		this.settings.session = result.session;
 		await this.saveSettings();
-		this.setStatus('UGREEN sync signed in');
+		this.setStatus({ label: 'Logged in', kind: 'success' });
 		void this.checkRemoteBaseDirAccessAfterLogin();
 		void this.updateConflictStatus();
 		return true;
@@ -170,7 +155,7 @@ export default class UgreenSyncPlugin extends Plugin {
 	async logout() {
 		this.settings.session = undefined;
 		await this.saveSettings();
-		this.setStatus('UGREEN sync needs sign-in');
+		this.setStatus({ label: 'Logged out', kind: 'warning' });
 		void this.updateConflictStatus();
 		new Notice('Logged out of UGREEN NAS.');
 	}
@@ -185,7 +170,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		});
 		if (this.settings.session === undefined) {
 			debugLog(this.settings, 'startup session check skipped', { reason: 'missing session' });
-			this.setStatus('UGREEN sync needs sign-in');
+			this.setStatus({ label: 'Logged out', kind: 'warning' });
 			void this.updateConflictStatus();
 			return;
 		}
@@ -193,7 +178,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		try {
 			if (await hasValidUgreenSession(this.settings)) {
 				debugLog(this.settings, 'startup session check success');
-				this.setStatus('UGREEN sync signed in');
+				this.setStatus({ label: 'Logged in', kind: 'success' });
 				void this.updateConflictStatus();
 				return;
 			}
@@ -201,13 +186,13 @@ export default class UgreenSyncPlugin extends Plugin {
 			debugLog(this.settings, 'startup session check expired');
 			this.settings.session = undefined;
 			await this.saveSettings();
-			this.setStatus('UGREEN sync needs sign-in');
+			this.setStatus({ label: 'Logged out', kind: 'warning' });
 		} catch (error) {
 			debugLog(this.settings, 'startup session check error', {
 				message: formatUgreenError(error),
 			});
 			logUgreenError('startup session check failed', error);
-			this.setStatus('UGREEN sync sign-in check failed');
+			this.setStatus({ label: 'Check failed', kind: 'error' });
 		} finally {
 			void this.updateConflictStatus();
 		}
@@ -291,39 +276,271 @@ export default class UgreenSyncPlugin extends Plugin {
 		});
 	}
 
-	private setStatus(message: string) {
-		this.statusBarItem?.setText(message);
+	private setStatus(status: SyncStatus) {
+		this.latestStatus = status;
+		if (this.statusBarItem === undefined) {
+			return;
+		}
+		const statusText = formatStatusText(status);
+		const statusClass = this.getStatusClass(status);
+		const statusIcon = this.getStatusIcon(status);
+
+		this.statusBarItem.toggleClass('ugreen-sync-status-running', statusClass === 'ugreen-sync-status-running');
+		this.statusBarItem.toggleClass('ugreen-sync-status-warning', statusClass === 'ugreen-sync-status-warning');
+		this.statusBarItem.toggleClass('ugreen-sync-status-success', statusClass === 'ugreen-sync-status-success');
+		this.statusBarItem.toggleClass('ugreen-sync-conflict-status', statusClass === 'ugreen-sync-conflict-status');
+		this.updateStatusIcon(statusIcon, status.progress);
+		this.statusBarItem.setAttribute('aria-label', `${statusText}. Open UGREEN sync menu`);
+		this.statusBarItem.setAttribute('title', statusText);
+	}
+
+	private updateStatusIcon(iconName: IconName, progress: number | undefined): void {
+		if (this.statusBarItem === undefined) {
+			return;
+		}
+
+		if (this.statusIconEl === undefined || this.statusIconName !== iconName) {
+			this.statusBarItem.empty();
+			this.statusProgressEl = undefined;
+			this.statusIconEl = activeDocument.createElement('span');
+			this.statusIconEl.addClass('ugreen-sync-status-icon');
+			setIcon(this.statusIconEl, iconName);
+			this.statusBarItem.append(this.statusIconEl);
+			this.statusIconName = iconName;
+		}
+
+		if (progress !== undefined) {
+			if (this.statusProgressEl === undefined) {
+				this.statusProgressEl = activeDocument.createElement('span');
+				this.statusProgressEl.addClass('ugreen-sync-status-progress');
+				this.statusIconEl.append(this.statusProgressEl);
+			}
+
+			this.statusProgressEl.setText(progress.toString());
+			return;
+		}
+
+		if (this.statusProgressEl !== undefined) {
+			this.statusProgressEl.remove();
+			this.statusProgressEl = undefined;
+		}
+	}
+
+	private showStatusMenu(event: MouseEvent): void {
+		const menu = new Menu();
+
+		menu.setUseNativeMenu(false);
+		menu.addItem((item) => {
+			item
+				.setTitle(this.createStatusMenuTitle())
+				.setIsLabel(true)
+				.setSection('ugreen-sync-status');
+		});
+		menu.addSeparator();
+		menu.addItem((item) => {
+			item
+				.setTitle('Sync now')
+				.setIcon('sync')
+				.setDisabled(!this.isSignedIn() || !this.hasRemoteBaseDir() || this.syncInProgress)
+				.onClick(() => {
+					void this.syncNow();
+				});
+		});
+		menu.addItem((item) => {
+			item
+				.setTitle('Settings')
+				.setIcon('settings')
+				.onClick(() => {
+					this.openSettings();
+				});
+		});
+
+		menu.showAtMouseEvent(event);
+	}
+
+	private createStatusMenuTitle(): DocumentFragment {
+		const fragment = activeDocument.createDocumentFragment();
+		const statusEl = activeDocument.createElement('div');
+		statusEl.addClass('ugreen-sync-menu-status');
+
+		const headingEl = activeDocument.createElement('div');
+		headingEl.addClass('ugreen-sync-menu-status-heading');
+		headingEl.setText('Sync status');
+		statusEl.append(headingEl);
+
+		for (const row of getStatusRows(this.latestStatus)) {
+			const rowEl = activeDocument.createElement('div');
+			rowEl.addClass('ugreen-sync-menu-status-row');
+			rowEl.setText(row);
+			statusEl.append(rowEl);
+		}
+
+		fragment.append(statusEl);
+		return fragment;
+	}
+
+	private getStatusIcon(status: SyncStatus): IconName {
+		if (status.kind === 'running') {
+			return 'refresh-cw';
+		}
+		if (status.kind === 'error') {
+			return 'alert-triangle';
+		}
+		if (status.kind === 'warning') {
+			return 'alert-circle';
+		}
+		if (status.kind === 'success') {
+			return 'check-circle';
+		}
+
+		return 'sync';
+	}
+
+	private getStatusClass(status: SyncStatus): string {
+		if (status.kind === 'running') {
+			return 'ugreen-sync-status-running';
+		}
+		if (status.kind === 'error') {
+			return 'ugreen-sync-conflict-status';
+		}
+		if (status.kind === 'warning') {
+			return 'ugreen-sync-status-warning';
+		}
+
+		return 'ugreen-sync-status-success';
+	}
+
+	private showStatusMenuAtStatusBar(): void {
+		const rect = this.statusBarItem?.getBoundingClientRect();
+		if (rect === undefined) {
+			return;
+		}
+
+		this.showStatusMenu(new MouseEvent('click', {
+			clientX: rect.left,
+			clientY: rect.top,
+			view: activeWindow,
+		}));
+	}
+
+	private openSettings(): void {
+		const setting = (this.app as AppWithSettings).setting;
+		if (setting === undefined) {
+			new Notice('Could not open UGREEN sync settings.');
+			return;
+		}
+
+		setting.open();
+		setting.openTabById(this.manifest.id);
 	}
 
 	private async updateConflictStatus() {
 		if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
-			this.ribbonIcon?.removeClass('ugreen-sync-conflict-ribbon');
-			this.ribbonIcon?.removeClass('mod-warning');
-			this.ribbonIcon?.addClass('ugreen-sync-disabled-ribbon');
-			this.ribbonIcon?.setAttribute('aria-disabled', 'true');
-			this.ribbonIcon?.setAttribute(
-				'aria-label',
-				this.isSignedIn() ? 'Set a NAS sync directory before syncing' : 'Sign in to UGREEN NAS before syncing',
-			);
-			this.ribbonIcon?.setAttribute('aria-label-position', 'right');
+			this.statusBarItem?.removeClass('ugreen-sync-conflict-status');
 			return;
 		}
 
 		const hasConflicts = await hasUnresolvedConflicts(this.app.vault);
-		const conflictStatus = 'UGREEN sync conflicts need resolution';
-		this.ribbonIcon?.removeClass('ugreen-sync-disabled-ribbon');
-		this.ribbonIcon?.removeAttribute('aria-disabled');
-		this.ribbonIcon?.toggleClass('ugreen-sync-conflict-ribbon', hasConflicts);
-		this.ribbonIcon?.toggleClass('mod-warning', hasConflicts);
-		this.ribbonIcon?.setAttribute(
-			'aria-label',
-			hasConflicts ? conflictStatus : 'Sync with UGREEN NAS',
-		);
-		this.ribbonIcon?.setAttribute('aria-label-position', 'right');
+		const conflictStatus: SyncStatus = { label: 'Conflicts', kind: 'error' };
 		if (hasConflicts) {
 			this.setStatus(conflictStatus);
-		} else if (this.statusBarItem?.textContent === conflictStatus) {
-			this.setStatus('UGREEN sync ready');
+		} else if (this.latestStatus.label === conflictStatus.label && this.latestStatus.kind === conflictStatus.kind) {
+			this.setStatus({ label: 'Ready', kind: 'success' });
+		} else {
+			this.statusBarItem?.removeClass('ugreen-sync-conflict-status');
 		}
 	}
+}
+
+type SyncStatusKind = 'running' | 'warning' | 'success' | 'error';
+
+interface SyncStatus {
+	label: string;
+	details?: string[];
+	kind: SyncStatusKind;
+	progress?: number;
+}
+
+type AppWithSettings = App & {
+	setting?: {
+		open(): void;
+		openTabById(id: string): void;
+	};
+};
+
+function formatStatusText(status: SyncStatus): string {
+	const label = formatStatusLabel(status);
+	if (status.details === undefined || status.details.length === 0) {
+		return label;
+	}
+
+	return `${label}: ${status.details.join(', ')}.`;
+}
+
+function getStatusRows(status: SyncStatus): string[] {
+	const label = formatStatusLabel(status);
+	if (status.details === undefined || status.details.length === 0) {
+		return [label];
+	}
+	if (status.label === 'Synced') {
+		return status.details;
+	}
+
+	return [label, ...status.details];
+}
+
+function formatStatusLabel(status: SyncStatus): string {
+	if (status.progress === undefined) {
+		return status.label;
+	}
+
+	return `${status.label} ${status.progress}%`;
+}
+
+function getSyncProgressPercent(progress: SyncProgress): number {
+	if (progress.total <= 0) {
+		return 100;
+	}
+
+	return Math.min(100, Math.max(0, Math.round((progress.completed / progress.total) * 100)));
+}
+
+function formatSyncStatusMessage(result: SyncResult): SyncStatus {
+	const stats = [
+		formatSyncStat(result.uploaded, 'uploaded'),
+		formatSyncStat(result.downloaded, 'downloaded'),
+		formatSyncStat(result.deletedLocal, 'local deleted'),
+		formatSyncStat(result.deletedRemote, 'remote deleted'),
+		formatSyncStat(result.conflicts, 'conflict', 'conflicts'),
+	].filter((stat): stat is string => stat !== undefined);
+
+	if (stats.length === 0) {
+		return { label: 'Synced', kind: 'success' };
+	}
+
+	return { label: 'Synced', details: stats, kind: 'success' };
+}
+
+function formatSyncSuccessNotice(result: SyncResult, vaultName: string): string {
+	const stats = [
+		formatSyncStat(result.uploaded, 'uploaded'),
+		formatSyncStat(result.downloaded, 'downloaded'),
+		formatSyncStat(result.deletedLocal, 'local deleted'),
+		formatSyncStat(result.deletedRemote, 'remote deleted'),
+		formatSyncStat(result.conflicts, 'conflict', 'conflicts'),
+	].filter((stat): stat is string => stat !== undefined);
+
+	if (stats.length === 0) {
+		return `${vaultName} is already synced.`;
+	}
+
+	return `${vaultName}: ${stats.join(', ')}.`;
+}
+
+function formatSyncStat(count: number, label: string, pluralLabel = label): string | undefined {
+	if (count === 0) {
+		return undefined;
+	}
+
+	return `${count} ${count === 1 ? label : pluralLabel}`;
 }

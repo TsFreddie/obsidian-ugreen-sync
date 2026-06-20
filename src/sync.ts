@@ -9,6 +9,7 @@ import {
 import {
 	LocalFileMeta,
 	RemoteFileMeta,
+	SyncProgress,
 	SyncResult,
 	SyncStateEntry,
 	UgreenSyncSettings,
@@ -18,7 +19,11 @@ import { CONFLICTS_FOLDER } from './constants';
 
 const MTIME_TOLERANCE_MS = 2000;
 
-export async function runSync(vault: Vault, settings: UgreenSyncSettings): Promise<SyncResult> {
+export async function runSync(
+	vault: Vault,
+	settings: UgreenSyncSettings,
+	onProgress?: (progress: SyncProgress) => void,
+): Promise<SyncResult> {
 	await ensureNoUnresolvedConflicts(vault);
 
 	debugLog(settings, 'sync start', {
@@ -33,7 +38,8 @@ export async function runSync(vault: Vault, settings: UgreenSyncSettings): Promi
 		remoteFiles: remoteFiles.size,
 	});
 	const nextState: Record<string, SyncStateEntry> = { ...settings.syncState };
-	const paths = new Set([...localFiles.keys(), ...remoteFiles.keys()]);
+	const sortedPaths = [...new Set([...localFiles.keys(), ...remoteFiles.keys()])].sort();
+	onProgress?.({ completed: 0, total: sortedPaths.length });
 	const result: SyncResult = {
 		syncState: nextState,
 		uploaded: 0,
@@ -43,26 +49,30 @@ export async function runSync(vault: Vault, settings: UgreenSyncSettings): Promi
 		conflicts: 0,
 	};
 
-	for (const path of [...paths].sort()) {
+	for (const [index, path] of sortedPaths.entries()) {
 		const local = localFiles.get(path);
 		const remote = remoteFiles.get(path);
 		const previous = settings.syncState[path];
 
-		if (local !== undefined && remote !== undefined) {
-			debugLog(settings, 'sync compare existing', { path, local, remote, previous });
-			await syncExistingFile(vault, settings, client, local, remote, previous, result);
-			continue;
-		}
+		try {
+			if (local !== undefined && remote !== undefined) {
+				debugLog(settings, 'sync compare existing', { path, local, remote, previous });
+				await syncExistingFile(vault, settings, client, local, remote, previous, result);
+				continue;
+			}
 
-		if (local !== undefined) {
-			debugLog(settings, 'sync local only', { path, local, previous });
-			await syncLocalOnlyFile(vault, settings, client, local, previous, result);
-			continue;
-		}
+			if (local !== undefined) {
+				debugLog(settings, 'sync local only', { path, local, previous });
+				await syncLocalOnlyFile(vault, settings, client, local, previous, result);
+				continue;
+			}
 
-		if (remote !== undefined) {
-			debugLog(settings, 'sync remote only', { path, remote, previous });
-			await syncRemoteOnlyFile(vault, settings, client, remote, previous, result);
+			if (remote !== undefined) {
+				debugLog(settings, 'sync remote only', { path, remote, previous });
+				await syncRemoteOnlyFile(vault, settings, client, remote, previous, result);
+			}
+		} finally {
+			onProgress?.({ completed: index + 1, total: sortedPaths.length, path });
 		}
 	}
 
@@ -101,19 +111,7 @@ async function syncExistingFile(
 			const localContent = await vault.adapter.readBinary(local.path);
 			const remoteContent = await downloadRemoteFile(client, settings, remote.path);
 			if (arrayBuffersEqual(localContent, remoteContent)) {
-				if (local.mtime > remote.mtime) {
-					debugLog(settings, 'sync decision same content upload newer local', { path: local.path });
-					await uploadAndRecord(vault, settings, client, local, result);
-					return;
-				}
-
-				if (remote.mtime > local.mtime) {
-					debugLog(settings, 'sync decision same content download newer remote', { path: remote.path });
-					await writeDownloadedContentAndRecord(vault, settings, remote, remoteContent, result);
-					return;
-				}
-
-				debugLog(settings, 'sync decision same content already matched', { path: local.path });
+				debugLog(settings, 'sync decision same content keep both timestamps', { path: local.path });
 				setSynced(result.syncState, local, remote);
 				return;
 			}

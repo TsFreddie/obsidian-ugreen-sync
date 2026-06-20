@@ -50,3 +50,9 @@ export interface SyncResult {
 	deletedRemote: number;
 	conflicts: number;
 }
+
+export interface SyncProgress {
+	completed: number;
+	total: number;
+	path?: string;
+}

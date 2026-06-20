@@ -110,7 +110,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 
 		new Setting(actionsCard)
 			.setName('Manual sync')
-			.setDesc('Runs a conservative two-way sync for the entire vault.')
+			.setDesc('Run a sync operation immediately.')
 			.addButton((button) => {
 				actionButtons.push(button.buttonEl);
 				button.buttonEl.disabled = !actionsEnabled;
