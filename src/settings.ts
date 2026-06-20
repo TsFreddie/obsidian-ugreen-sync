@@ -4,6 +4,14 @@ import { RemoteDirectoryPickerModal } from './remote-browser';
 import { formatUgreenError, getRemoteBaseDirAccessError, prepareAuthenticatedUgreenClient } from './ugreen';
 
 const REMOTE_BASE_DIR_CHECK_DEBOUNCE_MS = 600;
+const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
+const AUTO_SYNC_INTERVAL_OPTIONS: Record<string, string> = {
+	'1': '1 minute',
+	'5': '5 minutes',
+	'15': '15 minutes',
+	'30': '30 minutes',
+	'60': '1 hour',
+};
 
 export class UgreenSyncSettingTab extends PluginSettingTab {
 	plugin: UgreenSyncPlugin;
@@ -58,16 +66,15 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 
 		new Setting(connectionCard)
 			.setName('NAS sync directory')
-			.setDesc('The plugin creates this directory on the NAS if it does not exist.')
+			.setDesc('The plugin creates this directory on the NAS if it does not exist. Changing it resets sync history.')
 			.addText((text) => {
 				text.inputEl.disabled = !isSignedIn;
 				text
 					.setPlaceholder(isSignedIn ? 'Browse to select' : 'Sign in to config')
 					.setValue(isSignedIn ? this.plugin.settings.remoteBaseDir : '')
 					.onChange(async (value) => {
-						this.plugin.settings.remoteBaseDir = normalizeRemoteBaseDir(value);
+						await this.plugin.setRemoteBaseDir(normalizeRemoteBaseDir(value));
 						updateActionButtons();
-						await this.plugin.saveSettings();
 						this.scheduleRemoteBaseDirAccessCheck(remoteBaseDirMessageEl, REMOTE_BASE_DIR_CHECK_DEBOUNCE_MS);
 					});
 			})
@@ -81,8 +88,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 							initialPath: this.plugin.settings.remoteBaseDir,
 							vaultName: this.app.vault.getName(),
 							onChoose: async (path) => {
-								this.plugin.settings.remoteBaseDir = normalizeRemoteBaseDir(path);
-								await this.plugin.saveSettings();
+								await this.plugin.setRemoteBaseDir(normalizeRemoteBaseDir(path));
 								this.display();
 							},
 						}).open();
@@ -93,6 +99,36 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 			});
 		const remoteBaseDirMessageEl = connectionCard.createDiv({ cls: 'ugreen-sync-setting-message' });
 		this.scheduleRemoteBaseDirAccessCheck(remoteBaseDirMessageEl, 0);
+
+		const autoSyncCard = this.createSection(containerEl, 'Auto sync').cardEl;
+		new Setting(autoSyncCard)
+			.setName('Auto sync')
+			.setDesc(getAutoSyncDescription(this.plugin.settings.hasPendingChanges, this.plugin.settings.lastLocalChangeAt))
+			.addToggle((toggle) => {
+				toggle.toggleEl.toggleClass('is-disabled', !actionsEnabled);
+				toggle.toggleEl.setAttribute('aria-disabled', String(!actionsEnabled));
+				toggle.setValue(this.plugin.settings.autoSyncEnabled).onChange(async (value) => {
+					if (!actionsEnabled) {
+						toggle.setValue(false);
+						return;
+					}
+
+					await this.plugin.setAutoSyncEnabled(value);
+				});
+			});
+
+		new Setting(autoSyncCard)
+			.setName('Auto-sync interval')
+			.setDesc('How often automatic sync runs while auto-sync is enabled.')
+			.addDropdown((dropdown) => {
+				dropdown.selectEl.disabled = !actionsEnabled;
+				dropdown
+					.addOptions(AUTO_SYNC_INTERVAL_OPTIONS)
+					.setValue(String(normalizeAutoSyncIntervalMinutes(this.plugin.settings.autoSyncIntervalMinutes)))
+					.onChange(async (value) => {
+						await this.plugin.setAutoSyncIntervalMinutes(normalizeAutoSyncIntervalMinutes(Number(value)));
+					});
+			});
 
 		const actionsSection = this.createSection(containerEl, 'Actions');
 		const actionsCard = actionsSection.cardEl;
@@ -242,4 +278,24 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 function normalizeRemoteBaseDir(value: string): string {
 	const cleanPath = normalizePath(value.trim()).replace(/^\/+|\/+$/g, '');
 	return cleanPath === '' ? '' : `/${cleanPath}`;
+}
+
+function normalizeAutoSyncIntervalMinutes(minutes: number): number {
+	if (!Number.isFinite(minutes) || AUTO_SYNC_INTERVAL_OPTIONS[String(minutes)] === undefined) {
+		return DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
+	}
+
+	return minutes;
+}
+
+function getAutoSyncDescription(hasPendingChanges: boolean, lastLocalChangeAt: number): string {
+	if (!hasPendingChanges) {
+		return 'Run sync automatically after launch checks, before hiding or quitting, and on the interval.';
+	}
+
+	if (lastLocalChangeAt === 0) {
+		return 'Local changes have not synced yet.';
+	}
+
+	return `Local changes since ${new Date(lastLocalChangeAt).toLocaleString()} have not synced yet.`;
 }

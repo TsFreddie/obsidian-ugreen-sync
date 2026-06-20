@@ -6,6 +6,10 @@ export interface UgreenSyncSettings {
 	username: string;
 	session?: SessionContainer;
 	remoteBaseDir: string;
+	autoSyncEnabled: boolean;
+	autoSyncIntervalMinutes: number;
+	hasPendingChanges: boolean;
+	lastLocalChangeAt: number;
 	debugLogging: boolean;
 	syncState: Record<string, SyncStateEntry>;
 	lastSyncAt: number;
@@ -24,6 +28,10 @@ export const DEFAULT_SETTINGS: UgreenSyncSettings = {
 	username: '',
 	session: undefined,
 	remoteBaseDir: '',
+	autoSyncEnabled: false,
+	autoSyncIntervalMinutes: 15,
+	hasPendingChanges: false,
+	lastLocalChangeAt: 0,
 	debugLogging: false,
 	syncState: {},
 	lastSyncAt: 0,

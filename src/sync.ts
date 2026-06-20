@@ -17,27 +17,30 @@ import {
 import { debugLog } from './debug';
 import { CONFLICTS_FOLDER } from './constants';
 
-const MTIME_TOLERANCE_MS = 2000;
-
 export async function runSync(
 	vault: Vault,
 	settings: UgreenSyncSettings,
 	onProgress?: (progress: SyncProgress) => void,
 ): Promise<SyncResult> {
 	await ensureNoUnresolvedConflicts(vault);
-
-	debugLog(settings, 'sync start', {
+	const jobSettings: UgreenSyncSettings = {
+		...settings,
 		remoteBaseDir: settings.remoteBaseDir,
-		hasPreviousState: Object.keys(settings.syncState).length > 0,
+		syncState: { ...settings.syncState },
+	};
+
+	debugLog(jobSettings, 'sync start', {
+		remoteBaseDir: jobSettings.remoteBaseDir,
+		hasPreviousState: Object.keys(jobSettings.syncState).length > 0,
 	});
-	const client = await prepareUgreenClient(settings);
-	const localFiles = await listLocalFiles(vault, settings);
-	const remoteFiles = await listRemoteFiles(client, settings);
-	debugLog(settings, 'sync indexes ready', {
+	const client = await prepareUgreenClient(jobSettings);
+	const localFiles = await listLocalFiles(vault, jobSettings);
+	const remoteFiles = await listRemoteFiles(client, jobSettings);
+	debugLog(jobSettings, 'sync indexes ready', {
 		localFiles: localFiles.size,
 		remoteFiles: remoteFiles.size,
 	});
-	const nextState: Record<string, SyncStateEntry> = { ...settings.syncState };
+	const nextState: Record<string, SyncStateEntry> = { ...jobSettings.syncState };
 	const sortedPaths = [...new Set([...localFiles.keys(), ...remoteFiles.keys()])].sort();
 	onProgress?.({ completed: 0, total: sortedPaths.length });
 	const result: SyncResult = {
@@ -52,31 +55,31 @@ export async function runSync(
 	for (const [index, path] of sortedPaths.entries()) {
 		const local = localFiles.get(path);
 		const remote = remoteFiles.get(path);
-		const previous = settings.syncState[path];
+		const previous = jobSettings.syncState[path];
 
 		try {
 			if (local !== undefined && remote !== undefined) {
-				debugLog(settings, 'sync compare existing', { path, local, remote, previous });
-				await syncExistingFile(vault, settings, client, local, remote, previous, result);
+				debugLog(jobSettings, 'sync compare existing', { path, local, remote, previous });
+				await syncExistingFile(vault, jobSettings, client, local, remote, previous, result);
 				continue;
 			}
 
 			if (local !== undefined) {
-				debugLog(settings, 'sync local only', { path, local, previous });
-				await syncLocalOnlyFile(vault, settings, client, local, previous, result);
+				debugLog(jobSettings, 'sync local only', { path, local, previous });
+				await syncLocalOnlyFile(vault, jobSettings, client, local, previous, result);
 				continue;
 			}
 
 			if (remote !== undefined) {
-				debugLog(settings, 'sync remote only', { path, remote, previous });
-				await syncRemoteOnlyFile(vault, settings, client, remote, previous, result);
+				debugLog(jobSettings, 'sync remote only', { path, remote, previous });
+				await syncRemoteOnlyFile(vault, jobSettings, client, remote, previous, result);
 			}
 		} finally {
 			onProgress?.({ completed: index + 1, total: sortedPaths.length, path });
 		}
 	}
 
-	debugLog(settings, 'sync complete', { result });
+	debugLog(jobSettings, 'sync complete', { result });
 
 	return result;
 }
@@ -295,14 +298,14 @@ async function hasConflictFiles(vault: Vault, folderPath: string): Promise<boole
 }
 
 function hasLocalChanged(local: LocalFileMeta, previous: SyncStateEntry): boolean {
-	return local.size !== previous.size || Math.abs(local.mtime - previous.localMtime) > MTIME_TOLERANCE_MS;
+	return local.size !== previous.size || local.mtime !== previous.localMtime;
 }
 
 function hasRemoteChanged(remote: RemoteFileMeta, previous: SyncStateEntry): boolean {
 	return (
 		remote.size !== previous.size ||
 		remote.etag !== previous.etag ||
-		Math.abs(remote.mtime - previous.remoteMtime) > MTIME_TOLERANCE_MS
+		remote.mtime !== previous.remoteMtime
 	);
 }
 
