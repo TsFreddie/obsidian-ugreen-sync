@@ -2,6 +2,21 @@
 	color: var(--text-error);
 }
 
+.ugreen-sync-login-modal {
+	width: min(92vw, 620px);
+}
+
+.ugreen-sync-login-intro {
+	color: var(--text-muted);
+	margin-top: 0;
+}
+
+.ugreen-sync-login-message {
+	background: var(--background-modifier-hover);
+	border-radius: var(--radius-s);
+	padding: var(--size-4-2) var(--size-4-3);
+}
+
 .ugreen-sync-modal-actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -101,6 +116,10 @@
 	pointer-events: none;
 }
 
+.ugreen-sync-conflict-preview-spacer {
+	height: 0;
+}
+
 @media (max-width: 700px) {
 	.ugreen-sync-conflict-tabs {
 		background: var(--background-modifier-border);
@@ -122,6 +141,10 @@
 
 	.ugreen-sync-conflict-column {
 		display: none;
+	}
+
+	.ugreen-sync-conflict-columns.is-measuring .ugreen-sync-conflict-column {
+		display: flex;
 	}
 
 	.ugreen-sync-conflict-column.is-active {

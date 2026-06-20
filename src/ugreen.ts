@@ -1,9 +1,12 @@
 import { requestUrl } from 'obsidian';
 import type { RequestUrlParam, RequestUrlResponse } from 'obsidian';
 import { UgosApiError, UgosClient, UgosHttpError } from 'ug-file';
-import type { ConflictAction, UgosDirent } from 'ug-file';
+import type { ConflictAction, SessionContainer, UgosDirent, UgosLoginResult } from 'ug-file';
 import { UgreenSyncSettings, RemoteFileMeta } from './types';
 import { debugLog } from './debug';
+
+type UgreenClientSettings = Pick<UgreenSyncSettings, 'url' | 'ugreenLinkId'>;
+type UgosLoginFailureResult = Extract<UgosLoginResult, { success: false; requiresCode: false }>;
 
 const UGOS_FOLDER_ALREADY_EXISTS = 1327;
 const FORBIDDEN_REQUEST_HEADERS = new Set([
@@ -34,6 +37,12 @@ const STATUS_TEXTS: Record<number, string> = {
 	502: 'Bad Gateway',
 	503: 'Service Unavailable',
 	504: 'Gateway Timeout',
+};
+
+const LOGIN_TRUST_INFO = {
+	client_type: 'obsidian-plugin',
+	system: 'obsidian',
+	dev_name: 'obsidian-ugreen-sync',
 };
 
 class FetchHeaders {
@@ -82,24 +91,36 @@ class FetchResponse {
 	}
 }
 
-export function createUgreenClient(settings: UgreenSyncSettings): UgosClient {
-	validateSettings(settings);
+export function createUgreenClient(settings: UgreenClientSettings): UgosClient {
+	validateConnectionSettings(settings);
+
+	const options = {
+		fetch: fetchAdapter,
+		trustInfo: LOGIN_TRUST_INFO,
+	};
 
 	if (settings.url.trim() !== '') {
 		return new UgosClient({
 			url: normalizeUrl(settings.url),
-			username: settings.username,
-			password: settings.password,
-			fetch: fetchAdapter,
+			...options,
 		});
 	}
 
 	return new UgosClient({
 		uglinkid: settings.ugreenLinkId,
-		username: settings.username,
-		password: settings.password,
-		fetch: fetchAdapter,
+		...options,
 	});
+}
+
+export async function hasValidUgreenSession(settings: UgreenSyncSettings): Promise<boolean> {
+	const session = getSavedSession(settings);
+	if (session === undefined) {
+		return false;
+	}
+
+	const client = createUgreenClient(settings);
+	const result = await client.login(session);
+	return result.success && (await client.checkLogin());
 }
 
 export async function prepareUgreenClient(settings: UgreenSyncSettings): Promise<UgosClient> {
@@ -108,7 +129,16 @@ export async function prepareUgreenClient(settings: UgreenSyncSettings): Promise
 		remoteBaseDir: settings.remoteBaseDir,
 	});
 	const client = createUgreenClient(settings);
-	await client.login();
+	const session = getSavedSession(settings);
+	if (session === undefined) {
+		throw new Error('Sign in to UGREEN NAS before syncing.');
+	}
+
+	const result = await client.login(session);
+	if (!result.success || !(await client.checkLogin())) {
+		throw new Error('UGREEN NAS session expired. Sign in again before syncing.');
+	}
+
 	const basePath = getRemoteBasePath(settings);
 	debugLog(settings, 'remote base exists check', { path: basePath });
 	if (!(await client.exists(basePath))) {
@@ -220,6 +250,15 @@ export function formatUgreenError(error: unknown): string {
 		return error.message;
 	}
 	return String(error);
+}
+
+export function formatLoginResultError(result: UgosLoginFailureResult): string {
+	return joinErrorParts([
+		'UGREEN NAS login failed',
+		result.message,
+		`code ${result.code}`,
+		getResponseSummary(result.body),
+	]);
 }
 
 export function logUgreenError(context: string, error: unknown): void {
@@ -420,18 +459,23 @@ function direntToRemoteFile(entry: UgosDirent, basePath: string): RemoteFileMeta
 	};
 }
 
-function validateSettings(settings: UgreenSyncSettings): void {
+function getSavedSession(settings: UgreenSyncSettings): SessionContainer | undefined {
+	const session = settings.session;
+	if (
+		session === undefined ||
+		session.tokenId === '' ||
+		session.token === '' ||
+		session.publicKey === '' ||
+		session.uid <= 0
+	) {
+		return undefined;
+	}
+	return session;
+}
+
+function validateConnectionSettings(settings: UgreenClientSettings): void {
 	if (settings.url.trim() === '' && settings.ugreenLinkId.trim() === '') {
 		throw new Error('NAS address or UGREENlink ID is required.');
-	}
-	if (settings.username.trim() === '') {
-		throw new Error('Username is required.');
-	}
-	if (settings.password === '') {
-		throw new Error('Password is required.');
-	}
-	if (settings.remoteBaseDir.trim() === '') {
-		throw new Error('NAS sync directory is required.');
 	}
 }
 

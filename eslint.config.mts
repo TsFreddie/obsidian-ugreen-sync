@@ -5,6 +5,7 @@ import { globalIgnores } from 'eslint/config';
 
 export default tseslint.config(
 	globalIgnores([
+		'.kilo',
 		'node_modules',
 		'dist',
 		'esbuild.config.mjs',
@@ -30,4 +31,16 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			'obsidianmd/ui/sentence-case': [
+				'error',
+				{
+					enforceCamelCaseLower: true,
+					brands: ['UGREEN', 'UGOS', 'UGREENlink', 'Obsidian'],
+					acronyms: ['ID', 'NAS', 'OTP', 'URL'],
+				},
+			],
+		},
+	},
 );

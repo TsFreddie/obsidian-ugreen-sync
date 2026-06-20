@@ -66,7 +66,7 @@ export function openConflictPrompt(app: App, onResolve: () => void): void {
 export async function openConflictResolver(app: App, onResolved: () => void): Promise<void> {
 	const conflicts = await getConflictFiles(app.vault);
 	if (conflicts.length === 0) {
-		new Notice('No unresolved ugreen sync conflicts found.');
+		new Notice('No unresolved UGREEN sync conflicts found.');
 		onResolved();
 		return;
 	}
@@ -211,7 +211,7 @@ class ConflictPromptModal extends Modal {
 		this.setTitle('Resolve sync conflicts');
 		this.contentEl.empty();
 		this.contentEl.createEl('p', {
-			text: 'Ugreen sync can not proceed while files remain in .conflicts.',
+			text: 'UGREEN sync can not proceed while files remain in .conflicts.',
 		});
 		this.contentEl.createEl('p', { text: 'Resolve them now?' });
 
@@ -238,6 +238,8 @@ class ConflictResolverModal extends Modal {
 	private index = 0;
 	private markdownComponent = new Component();
 	private onResolved: () => void;
+	private previewScrollLeft = 0;
+	private previewScrollTop = 0;
 
 	constructor(app: App, conflicts: ConflictFile[], onResolved: () => void) {
 		super(app);
@@ -281,6 +283,7 @@ class ConflictResolverModal extends Modal {
 			await this.renderPreview(columnsEl, conflict, panes[0], 0),
 			await this.renderPreview(columnsEl, conflict, panes[1], 1),
 		].filter((previewEl): previewEl is HTMLElement => previewEl !== null);
+		this.equalizePreviewScrollHeights(columnsEl, previewEls);
 		this.setActivePane(columnsEl, tabsEl, this.activePaneIndex);
 		this.syncPaneTabs(tabsEl, columnsEl);
 		this.syncPaneSwipe(columnsEl, tabsEl);
@@ -332,6 +335,7 @@ class ConflictResolverModal extends Modal {
 			const previewEl = columnEl.createDiv({ cls: 'ugreen-sync-conflict-preview' });
 			previewEl.classList.add('markdown-rendered');
 			await MarkdownRenderer.render(this.app, preview, previewEl, conflict.originalPath, this.markdownComponent);
+			previewEl.createDiv({ cls: 'ugreen-sync-conflict-preview-spacer' });
 			this.renderPreviewActions(columnEl, conflict, side);
 			return previewEl;
 		} else {
@@ -366,6 +370,7 @@ class ConflictResolverModal extends Modal {
 			tabEl.classList.toggle('is-active', tabIndex === this.activePaneIndex);
 			tabEl.setAttribute('aria-selected', String(tabIndex === this.activePaneIndex));
 		});
+		this.applyActivePreviewScroll(columnsEl);
 	}
 
 	private syncPaneTabs(tabsEl: HTMLElement, columnsEl: HTMLElement): void {
@@ -426,20 +431,51 @@ class ConflictResolverModal extends Modal {
 				}
 
 				syncing = true;
-				const sourceMaxTop = sourceEl.scrollHeight - sourceEl.clientHeight;
-				const topRatio = sourceMaxTop <= 0 ? 0 : sourceEl.scrollTop / sourceMaxTop;
+				this.previewScrollTop = sourceEl.scrollTop;
+				this.previewScrollLeft = sourceEl.scrollLeft;
 				for (const targetEl of previewEls) {
 					if (targetEl === sourceEl) {
 						continue;
 					}
 
-					const targetMaxTop = targetEl.scrollHeight - targetEl.clientHeight;
-					targetEl.scrollTop = targetMaxTop * topRatio;
+					targetEl.scrollTop = sourceEl.scrollTop;
 					targetEl.scrollLeft = sourceEl.scrollLeft;
 				}
 				syncing = false;
 			});
 		}
+	}
+
+	private equalizePreviewScrollHeights(columnsEl: HTMLElement, previewEls: HTMLElement[]): void {
+		if (previewEls.length < 2) {
+			return;
+		}
+
+		columnsEl.classList.add('is-measuring');
+		const scrollHeights = previewEls.map((previewEl) => previewEl.scrollHeight);
+		const maxScrollHeight = Math.max(...scrollHeights);
+		previewEls.forEach((previewEl, index) => {
+			const scrollHeight = scrollHeights[index] ?? 0;
+			const spacerEl = previewEl.querySelector<HTMLElement>('.ugreen-sync-conflict-preview-spacer');
+			if (spacerEl === null) {
+				return;
+			}
+
+			spacerEl.style.height = `${Math.max(0, maxScrollHeight - scrollHeight)}px`;
+		});
+		columnsEl.classList.remove('is-measuring');
+	}
+
+	private applyActivePreviewScroll(columnsEl: HTMLElement): void {
+		const activePreviewEl = columnsEl.querySelector<HTMLElement>(
+			'.ugreen-sync-conflict-column.is-active .ugreen-sync-conflict-preview',
+		);
+		if (activePreviewEl === null) {
+			return;
+		}
+
+		activePreviewEl.scrollTop = this.previewScrollTop;
+		activePreviewEl.scrollLeft = this.previewScrollLeft;
 	}
 
 	private resetMarkdownComponent(): void {
@@ -451,6 +487,8 @@ class ConflictResolverModal extends Modal {
 	private choose(conflict: ConflictFile, choice: ConflictChoice): void {
 		this.decisions.set(conflict.conflictPath, { conflict, choice });
 		this.activePaneIndex = 1;
+		this.previewScrollLeft = 0;
+		this.previewScrollTop = 0;
 		this.index += 1;
 		void this.renderCurrent();
 	}

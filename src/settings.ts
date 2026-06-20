@@ -14,57 +14,37 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName('Connection').setHeading();
+		new Setting(containerEl).setName('Login').setHeading();
 
+		const isSignedIn = this.plugin.settings.session !== undefined;
 		new Setting(containerEl)
-			.setName('Nas address')
-			.setDesc('Direct ugos URL. Leave blank when using ugreenlink ID.')
-			.addText((text) =>
-				text
-					.setPlaceholder('https://your-nas.example.com')
-					.setValue(this.plugin.settings.url)
-					.onChange(async (value) => {
-						this.plugin.settings.url = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
+			.setName(isSignedIn ? 'Signed in' : 'Not signed in')
+			.setDesc(
+				isSignedIn
+					? `Signed in${this.plugin.settings.username.trim() === '' ? '.' : ` as ${this.plugin.settings.username}.`}`
+					: 'Sign in before running sync.',
+			)
+			.addButton((button) => {
+				if (isSignedIn) {
+					button.setButtonText('Log out').onClick(() => {
+						void this.plugin.logout().then(() => this.display());
+					});
+					return;
+				}
 
-		new Setting(containerEl)
-			.setName('Ugreenlink ID')
-			.setDesc('Alternative to direct nas address.')
-			.addText((text) =>
-				text
-					.setPlaceholder('Your-ugreenlink-id')
-					.setValue(this.plugin.settings.ugreenLinkId)
-					.onChange(async (value) => {
-						this.plugin.settings.ugreenLinkId = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName('Username')
-			.addText((text) =>
-				text.setValue(this.plugin.settings.username).onChange(async (value) => {
-					this.plugin.settings.username = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName('Password')
-			.setDesc('Stored locally in this plugin settings file.')
-			.addText((text) => {
-				text.inputEl.type = 'password';
-				text.setValue(this.plugin.settings.password).onChange(async (value) => {
-					this.plugin.settings.password = value;
-					await this.plugin.saveSettings();
-				});
+				button
+					.setButtonText('Sign in')
+					.setCta()
+					.onClick(() => {
+						void this.plugin.signIn().then(() => this.display());
+					});
 			});
 
+		new Setting(containerEl).setName('Remote sync directory').setHeading();
+
 		new Setting(containerEl)
-			.setName('Nas sync directory')
-			.setDesc('The plugin creates this directory on the nas if it does not exist.')
+			.setName('NAS sync directory')
+			.setDesc('The plugin creates this directory on the NAS if it does not exist.')
 			.addText((text) =>
 				text
 					.setPlaceholder(this.app.vault.getName())
@@ -151,14 +131,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName('Actions').setHeading();
 
 		new Setting(containerEl)
-			.setName('Connection')
-			.addButton((button) =>
-				button.setButtonText('Test login').onClick(() => {
-					void this.plugin.testConnection();
-				}),
-			);
-
-		new Setting(containerEl)
 			.setName('Manual sync')
 			.setDesc('Runs a conservative two-way sync for the selected local folders.')
 			.addButton((button) =>
@@ -191,7 +163,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.syncState = {};
 					this.plugin.settings.lastSyncAt = 0;
 					await this.plugin.saveSettings();
-					new Notice('Ugreen sync history reset. Files were not deleted.');
+					new Notice('UGREEN sync history reset. Files were not deleted.');
 					this.display();
 				}),
 			);

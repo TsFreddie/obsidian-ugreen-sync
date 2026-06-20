@@ -1,8 +1,10 @@
+import type { SessionContainer } from 'ug-file';
+
 export interface UgreenSyncSettings {
 	url: string;
 	ugreenLinkId: string;
 	username: string;
-	password: string;
+	session?: SessionContainer;
 	remoteBaseDir: string;
 	localFolders: string[];
 	debugLogging: boolean;
@@ -21,7 +23,7 @@ export const DEFAULT_SETTINGS: UgreenSyncSettings = {
 	url: '',
 	ugreenLinkId: '',
 	username: '',
-	password: '',
+	session: undefined,
 	remoteBaseDir: '',
 	localFolders: [],
 	debugLogging: false,

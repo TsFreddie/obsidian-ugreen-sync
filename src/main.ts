@@ -1,9 +1,11 @@
 import { Notice, Plugin } from 'obsidian';
+import { openUgreenLoginModal } from './login';
 import { UgreenSyncSettingTab } from './settings';
 import { DEFAULT_SETTINGS, UgreenSyncSettings } from './types';
 import { runSync } from './sync';
-import { createUgreenClient, formatUgreenError, logUgreenError } from './ugreen';
+import { formatUgreenError, hasValidUgreenSession, logUgreenError } from './ugreen';
 import { hasUnresolvedConflicts, openConflictPrompt, openConflictResolver } from './conflicts';
+import { debugLog } from './debug';
 
 export default class UgreenSyncPlugin extends Plugin {
 	settings!: UgreenSyncSettings;
@@ -14,12 +16,13 @@ export default class UgreenSyncPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		this.ribbonIcon = this.addRibbonIcon('sync', 'Sync with ugreen nas', () => {
+		this.ribbonIcon = this.addRibbonIcon('sync', 'Sync with UGREEN NAS', () => {
 			void this.syncNow();
 		});
 
 		this.statusBarItem = this.addStatusBarItem();
-		this.setStatus('UGREEN sync ready');
+		this.setStatus('UGREEN sync checking sign-in...');
+		void this.checkLoginOnLaunch();
 		void this.updateConflictStatus();
 		this.registerEvent(this.app.vault.on('create', () => void this.updateConflictStatus()));
 		this.registerEvent(this.app.vault.on('delete', () => void this.updateConflictStatus()));
@@ -43,9 +46,9 @@ export default class UgreenSyncPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'test-connection',
-			name: 'Test ugreen nas connection',
+			name: 'Sign in to UGREEN NAS',
 			callback: () => {
-				void this.testConnection();
+				void this.signIn();
 			},
 		});
 
@@ -54,7 +57,12 @@ export default class UgreenSyncPlugin extends Plugin {
 
 	async syncNow() {
 		if (this.syncInProgress) {
-			new Notice('Ugreen sync is already running.');
+			new Notice('UGREEN sync is already running.');
+			return;
+		}
+
+		if (!(await this.ensureSignedIn())) {
+			this.setStatus('UGREEN sync needs sign-in');
 			return;
 		}
 
@@ -95,22 +103,95 @@ export default class UgreenSyncPlugin extends Plugin {
 		});
 	}
 
+	async signIn(): Promise<boolean> {
+		const result = await openUgreenLoginModal(this.app, this.settings);
+		if (result === undefined) {
+			return false;
+		}
+
+		this.settings.url = result.url;
+		this.settings.ugreenLinkId = result.ugreenLinkId;
+		this.settings.username = result.username;
+		this.settings.session = result.session;
+		await this.saveSettings();
+		this.setStatus('UGREEN sync signed in');
+		return true;
+	}
+
+	async logout() {
+		this.settings.session = undefined;
+		await this.saveSettings();
+		this.setStatus('UGREEN sync needs sign-in');
+		new Notice('Logged out of UGREEN NAS.');
+	}
+
 	async testConnection() {
+		await this.signIn();
+	}
+
+	private async checkLoginOnLaunch(): Promise<void> {
+		debugLog(this.settings, 'startup session check start', {
+			hasSession: this.settings.session !== undefined,
+		});
+		if (this.settings.session === undefined) {
+			debugLog(this.settings, 'startup session check skipped', { reason: 'missing session' });
+			this.setStatus('UGREEN sync needs sign-in');
+			void this.updateConflictStatus();
+			return;
+		}
+
 		try {
-			const client = createUgreenClient(this.settings);
-			await client.login();
-			new Notice('Ugreen nas connection succeeded.');
+			if (await hasValidUgreenSession(this.settings)) {
+				debugLog(this.settings, 'startup session check success');
+				this.setStatus('UGREEN sync signed in');
+				void this.updateConflictStatus();
+				return;
+			}
+
+			debugLog(this.settings, 'startup session check expired');
+			this.settings.session = undefined;
+			await this.saveSettings();
+			this.setStatus('UGREEN sync needs sign-in');
 		} catch (error) {
-			logUgreenError('connection test failed', error);
-			new Notice(`UGREEN NAS connection failed: ${formatUgreenError(error)}`, 8000);
+			debugLog(this.settings, 'startup session check error', {
+				message: formatUgreenError(error),
+			});
+			logUgreenError('startup session check failed', error);
+			this.setStatus('UGREEN sync sign-in check failed');
+		} finally {
+			void this.updateConflictStatus();
 		}
 	}
 
+	private async ensureSignedIn(): Promise<boolean> {
+		if (this.settings.session !== undefined) {
+			try {
+				if (await hasValidUgreenSession(this.settings)) {
+					return true;
+				}
+			} catch (error) {
+				logUgreenError('session check failed', error);
+				new Notice(`UGREEN NAS session check failed: ${formatUgreenError(error)}`, 8000);
+				return false;
+			}
+
+			this.settings.session = undefined;
+			await this.saveSettings();
+		}
+
+		return this.signIn();
+	}
+
 	async loadSettings() {
+		const savedSettings = ((await this.loadData()) ?? {}) as Partial<UgreenSyncSettings> & {
+			password?: string;
+		};
+		delete savedSettings.password;
+
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<UgreenSyncSettings>,
+			savedSettings,
 		);
 		if (this.settings.remoteBaseDir === '') {
 			this.settings.remoteBaseDir = this.app.vault.getName();
@@ -118,7 +199,9 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		const data = { ...this.settings } as Record<string, unknown>;
+		delete data.password;
+		await this.saveData(data);
 	}
 
 	private setStatus(message: string) {
@@ -132,7 +215,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.ribbonIcon?.toggleClass('mod-warning', hasConflicts);
 		this.ribbonIcon?.setAttribute(
 			'aria-label',
-			hasConflicts ? conflictStatus : 'Sync with ugreen nas',
+			hasConflicts ? conflictStatus : 'Sync with UGREEN NAS',
 		);
 		this.ribbonIcon?.setAttribute('aria-label-position', 'right');
 		if (hasConflicts) {
