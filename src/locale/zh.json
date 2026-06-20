@@ -56,8 +56,8 @@
   },
   "settings": {
     "connection": "连接",
-    "signedIn": "已登录",
-    "notSignedIn": "未登录",
+    "signedIn": "已登录绿联云",
+    "notSignedIn": "未登录绿联云",
     "signInBeforeSync": "运行同步前请先登录。",
     "logOut": "登出",
     "signIn": "登录",

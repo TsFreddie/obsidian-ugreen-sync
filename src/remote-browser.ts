@@ -38,7 +38,7 @@ export class RemoteDirectoryPickerModal extends Modal {
 
 	private render(): void {
 		this.contentEl.empty();
-		this.contentEl.createEl('h2', { text: t('browser.title') });
+		this.setTitle(t('browser.title'));
 
 		this.selectedPathEl = this.contentEl.createDiv({ cls: 'ugreen-sync-browser-path' });
 		this.updateSelectedPath();

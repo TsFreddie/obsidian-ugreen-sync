@@ -424,6 +424,15 @@ this.setSignedInIdleStatus(t('status.loggedIn'));
 
 		this.settings.remoteBaseDir = remoteBaseDir;
 
+		if (remoteBaseDir.trim() === '') {
+			this.settings.autoSyncManualBlockReason = undefined;
+			this.disableAutoSyncForSafety();
+			await this.saveSettings();
+			this.configureAutoSyncInterval();
+			this.setSignedInIdleStatus(t('status.syncPathNeeded'));
+			return;
+		}
+
 		if (isRestoringPreviousDir) {
 			this.settings.autoSyncManualBlockReason = undefined;
 			this.disableAutoSyncForSafety();
@@ -451,6 +460,7 @@ this.setSignedInIdleStatus(t('status.loggedIn'));
 		this.disableAutoSyncForSafety();
 		await this.saveSettings();
 		this.configureAutoSyncInterval();
+		this.setSignedInIdleStatus(t('status.ready'));
 	}
 
 	async setAutoSyncEnabled(enabled: boolean): Promise<void> {

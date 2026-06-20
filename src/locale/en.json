@@ -56,8 +56,8 @@
   },
   "settings": {
     "connection": "Connection",
-    "signedIn": "Signed in",
-    "notSignedIn": "Not signed in",
+    "signedIn": "UGREEN NAS Signed in",
+    "notSignedIn": "UGREEN NAS Not signed in",
     "signInBeforeSync": "Sign in before running sync.",
     "logOut": "Log out",
     "signIn": "Sign in",
