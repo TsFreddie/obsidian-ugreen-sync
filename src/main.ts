@@ -39,12 +39,14 @@ const LOCAL_CHANGE_SAVE_DEBOUNCE_MS = 500;
 
 export default class UgreenSyncPlugin extends Plugin {
 	settings!: UgreenSyncSettings;
+	private settingTab?: UgreenSyncSettingTab;
 	private statusBarItem?: HTMLElement;
 	private statusIconEl?: HTMLElement;
 	private statusIconName?: IconName;
 	private statusProgressEl?: HTMLElement;
 	private latestStatus: SyncStatus = { label: 'Checking', kind: 'running' };
 	private syncInProgress = false;
+	private syncPromise?: Promise<boolean>;
 	private autoSyncIntervalId?: number;
 	private autoSyncQueued = false;
 	private pendingChangeSaveTimeout?: number;
@@ -96,14 +98,29 @@ export default class UgreenSyncPlugin extends Plugin {
 			},
 		});
 
-		this.addSettingTab(new UgreenSyncSettingTab(this.app, this));
+		this.settingTab = new UgreenSyncSettingTab(this.app, this);
+		this.addSettingTab(this.settingTab);
 	}
 
-	onunload() {
-		void this.runAutoSync('quit', { requirePendingChanges: true });
-	}
+	onunload() {}
 
 	async syncNow(options: SyncNowOptions = {}): Promise<boolean> {
+		if (this.syncPromise !== undefined) {
+			return this.syncPromise;
+		}
+
+		const syncPromise = this.runSyncNow(options);
+		this.syncPromise = syncPromise;
+		try {
+			return await syncPromise;
+		} finally {
+			if (this.syncPromise === syncPromise) {
+				this.syncPromise = undefined;
+			}
+		}
+	}
+
+	private async runSyncNow(options: SyncNowOptions): Promise<boolean> {
 		const showInfoNotices = options.showInfoNotices ?? true;
 		const showSuccessNotice = options.showSuccessNotice ?? true;
 		const promptOnConflicts = options.promptOnConflicts ?? true;
@@ -121,13 +138,6 @@ export default class UgreenSyncPlugin extends Plugin {
 			this.setStatus({ label: 'No NAS directory', kind: 'warning' });
 			if (showInfoNotices) {
 				new Notice('Set a NAS sync directory before syncing.');
-			}
-			return false;
-		}
-
-		if (this.syncInProgress) {
-			if (showInfoNotices) {
-				new Notice('UGREEN sync is already running.');
 			}
 			return false;
 		}
@@ -470,8 +480,20 @@ export default class UgreenSyncPlugin extends Plugin {
 
 	private registerAutoSyncLifecycleHandlers(): void {
 		this.registerEvent(
-			this.app.workspace.on('quit', () => {
-				void this.runAutoSync('quit');
+			this.app.workspace.on('quit', (tasks) => {
+				if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
+					return;
+				}
+				debugLog(this.settings, 'quit sync trigger');
+				tasks.addPromise(
+					this.syncNow({
+						showInfoNotices: false,
+						showSuccessNotice: false,
+						allowLoginPrompt: false,
+						promptOnConflicts: false,
+						clearAutoSyncManualBlock: false,
+					}),
+				);
 			}),
 		);
 		this.registerDomEvent(activeDocument, 'visibilitychange', () => {
@@ -485,7 +507,16 @@ export default class UgreenSyncPlugin extends Plugin {
 			}
 		});
 		this.registerDomEvent(activeWindow, 'pagehide', () => {
-			void this.runAutoSync('quit', { requirePendingChanges: true });
+			if (!this.settings.hasPendingChanges) {
+				return;
+			}
+			void this.syncNow({
+				showInfoNotices: false,
+				showSuccessNotice: false,
+				allowLoginPrompt: false,
+				promptOnConflicts: false,
+				clearAutoSyncManualBlock: false,
+			});
 		});
 	}
 
@@ -628,6 +659,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.settings.autoSyncEnabled = false;
 		this.settings.autoSyncManualBlockReason = undefined;
 		this.clearAutoSyncInterval();
+		this.settingTab?.refreshAutoSyncControls();
 		new Notice(AUTO_SYNC_DISABLED_NOTICE, 8000);
 	}
 

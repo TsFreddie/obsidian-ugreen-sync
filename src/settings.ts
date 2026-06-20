@@ -1,4 +1,12 @@
-import { App, Notice, PluginSettingTab, Setting, normalizePath } from 'obsidian';
+import {
+	App,
+	Notice,
+	PluginSettingTab,
+	Setting,
+	normalizePath,
+	type DropdownComponent,
+	type ToggleComponent,
+} from 'obsidian';
 import type UgreenSyncPlugin from './main';
 import { RemoteDirectoryPickerModal } from './remote-browser';
 import { formatUgreenError, getRemoteBaseDirAccessError, prepareAuthenticatedUgreenClient } from './ugreen';
@@ -19,6 +27,8 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 	private diagnosticsVisible = false;
 	private remoteBaseDirCheckId = 0;
 	private remoteBaseDirCheckTimeout?: number;
+	private autoSyncIntervalDropdown?: DropdownComponent;
+	private autoSyncToggle?: ToggleComponent;
 
 	constructor(app: App, plugin: UgreenSyncPlugin) {
 		super(app, plugin);
@@ -28,15 +38,16 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		this.autoSyncIntervalDropdown = undefined;
+		this.autoSyncToggle = undefined;
 
 		const connectionCard = this.createSection(containerEl).cardEl;
 
 		const isSignedIn = this.plugin.settings.session !== undefined;
-		const hasRemoteBaseDir = this.plugin.settings.remoteBaseDir.trim() !== '';
-		const actionsEnabled = isSignedIn && hasRemoteBaseDir;
+		const actionsEnabled = this.hasActionsEnabled();
 		const actionButtons: HTMLButtonElement[] = [];
 		const updateActionButtons = () => {
-			const enabled = this.plugin.settings.session !== undefined && this.plugin.settings.remoteBaseDir.trim() !== '';
+			const enabled = this.hasActionsEnabled();
 			for (const buttonEl of actionButtons) {
 				buttonEl.disabled = !enabled;
 			}
@@ -64,7 +75,8 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 					});
 			});
 
-		new Setting(connectionCard)
+		const settingsCard = this.createSection(containerEl, 'Settings').cardEl;
+		new Setting(settingsCard)
 			.setName('NAS sync directory')
 			.setDesc('The plugin creates this directory on the NAS if it does not exist. Changing it resets sync history.')
 			.addText((text) => {
@@ -75,6 +87,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						await this.plugin.setRemoteBaseDir(normalizeRemoteBaseDir(value));
 						updateActionButtons();
+						this.refreshAutoSyncControls();
 						this.scheduleRemoteBaseDirAccessCheck(remoteBaseDirMessageEl, REMOTE_BASE_DIR_CHECK_DEBOUNCE_MS);
 					});
 			})
@@ -97,37 +110,38 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 					}
 				});
 			});
-		const remoteBaseDirMessageEl = connectionCard.createDiv({ cls: 'ugreen-sync-setting-message' });
+		const remoteBaseDirMessageEl = settingsCard.createDiv({ cls: 'ugreen-sync-setting-message' });
 		this.scheduleRemoteBaseDirAccessCheck(remoteBaseDirMessageEl, 0);
 
-		const autoSyncCard = this.createSection(containerEl, 'Auto sync').cardEl;
-		new Setting(autoSyncCard)
+		new Setting(settingsCard)
 			.setName('Auto sync')
 			.setDesc(getAutoSyncDescription(this.plugin.settings.hasPendingChanges, this.plugin.settings.lastLocalChangeAt))
 			.addToggle((toggle) => {
-				toggle.toggleEl.toggleClass('is-disabled', !actionsEnabled);
-				toggle.toggleEl.setAttribute('aria-disabled', String(!actionsEnabled));
-				toggle.setValue(this.plugin.settings.autoSyncEnabled).onChange(async (value) => {
-					if (!actionsEnabled) {
-						toggle.setValue(false);
+				this.autoSyncToggle = toggle;
+				this.refreshAutoSyncControls();
+				toggle.onChange(async (value) => {
+					if (!this.hasActionsEnabled()) {
+						this.refreshAutoSyncControls();
 						return;
 					}
 
 					await this.plugin.setAutoSyncEnabled(value);
+					this.refreshAutoSyncControls();
 				});
 			});
 
-		new Setting(autoSyncCard)
+		new Setting(settingsCard)
 			.setName('Auto-sync interval')
 			.setDesc('How often automatic sync runs while auto-sync is enabled.')
 			.addDropdown((dropdown) => {
-				dropdown.selectEl.disabled = !actionsEnabled;
 				dropdown
 					.addOptions(AUTO_SYNC_INTERVAL_OPTIONS)
 					.setValue(String(normalizeAutoSyncIntervalMinutes(this.plugin.settings.autoSyncIntervalMinutes)))
 					.onChange(async (value) => {
 						await this.plugin.setAutoSyncIntervalMinutes(normalizeAutoSyncIntervalMinutes(Number(value)));
 					});
+				this.autoSyncIntervalDropdown = dropdown;
+				this.refreshAutoSyncControls();
 			});
 
 		const actionsSection = this.createSection(containerEl, 'Actions');
@@ -191,6 +205,28 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 		if (this.diagnosticsVisible) {
 			this.displayDiagnostics(containerEl);
 		}
+	}
+
+	refreshAutoSyncControls(): void {
+		const actionsEnabled = this.hasActionsEnabled();
+		this.autoSyncToggle?.toggleEl.toggleClass('is-disabled', !actionsEnabled);
+		this.autoSyncToggle?.toggleEl.setAttribute('aria-disabled', String(!actionsEnabled));
+		this.autoSyncToggle?.setValue(this.plugin.settings.autoSyncEnabled);
+
+		if (this.autoSyncIntervalDropdown !== undefined) {
+			this.autoSyncIntervalDropdown.selectEl.disabled = !actionsEnabled;
+			this.autoSyncIntervalDropdown.setValue(
+				String(
+					normalizeAutoSyncIntervalMinutes(
+						this.plugin.settings.autoSyncIntervalMinutes,
+					),
+				),
+			);
+		}
+	}
+
+	private hasActionsEnabled(): boolean {
+		return this.plugin.settings.session !== undefined && this.plugin.settings.remoteBaseDir.trim() !== '';
 	}
 
 	private createSection(
