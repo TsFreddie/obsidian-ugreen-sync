@@ -1,6 +1,6 @@
 {
 	"name": "ugreen-sync",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"description": "Minimal Obsidian vault sync for UGREEN NAS.",
 	"main": "main.js",
 	"type": "module",

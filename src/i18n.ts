@@ -1,14 +1,12 @@
 import en from './locale/en.json';
 import zh from './locale/zh.json';
 
-type LocaleData = typeof en;
+type LocaleData = object;
 
-/* eslint-disable @typescript-eslint/no-unsafe-assignment -- JSON imports have implicit any type */
 const locales: Record<string, LocaleData> = {
-	en,
-	zh,
+	en: en as LocaleData,
+	zh: zh as LocaleData,
 };
-/* eslint-enable @typescript-eslint/no-unsafe-assignment */
 
 export const SUPPORTED_LOCALES = { en: 'English', zh: '中文' } as const;
 
@@ -31,11 +29,18 @@ export function detectLocale(appLang?: string | null): LocaleKey {
 	return 'en';
 }
 
-export function t(key: string, params?: Record<string, string | number>): string {
-	const localeData = (locales[currentLocale] ?? locales.en) as Record<string, unknown>;
-	const raw = getNestedValue(localeData, key)
-		?? getNestedValue(locales.en as Record<string, unknown>, key)
-		?? key;
+export function t(
+	key: string,
+	params?: Record<string, string | number>,
+): string {
+	const localeData = (locales[currentLocale] ?? locales.en) as Record<
+		string,
+		unknown
+	>;
+	const raw =
+		getNestedValue(localeData, key) ??
+		getNestedValue(locales.en as Record<string, unknown>, key) ??
+		key;
 	if (params) {
 		return raw.replace(/\{\{(\w+)\}\}/g, (_match, paramKey: string) =>
 			String(params[paramKey] ?? `{{${paramKey}}}`),
