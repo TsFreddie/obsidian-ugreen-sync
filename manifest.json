@@ -1,7 +1,7 @@
 {
 	"id": "ugreen-sync",
 	"name": "UGREEN NAS Sync",
-	"version": "1.0.5",
+	"version": "1.0.6",
 	"minAppVersion": "1.8.7",
 	"description": "Minimal vault sync plugin for UGREEN NAS.",
 	"author": "tsfreddie",
