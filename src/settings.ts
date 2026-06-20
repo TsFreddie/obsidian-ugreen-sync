@@ -5,11 +5,8 @@ import {
 	Notice,
 	PluginSettingTab,
 	Setting,
-	SettingGroup,
 	normalizePath,
-	type DropdownComponent,
-	type ExtraButtonComponent,
-	type ToggleComponent,
+	type DropdownComponent,	type ToggleComponent,
 } from 'obsidian';
 import type UgreenSyncPlugin from './main';
 import { RemoteDirectoryPickerModal } from './remote-browser';
@@ -79,7 +76,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 							this.app,
 							async () => {
 								await this.plugin.logout();
-								// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 								this.display();
 							},
 						).open();
@@ -91,7 +87,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 					.setButtonText(t('settings.signIn'))
 					.setCta()
 					.onClick(() => {
-						// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 						void this.plugin.signIn().then(() => this.display());
 					});
 			});
@@ -124,7 +119,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 							vaultName: this.app.vault.getName(),
 							onChoose: async (path) => {
 								await this.plugin.setRemoteBaseDir(normalizeRemoteBaseDir(path));
-								// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 								this.display();
 							},
 						}).open();
@@ -183,7 +177,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 
 			this.actionsHeaderClicks = 0;
 			this.diagnosticsVisible = true;
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 			this.display();
 		});
 
@@ -228,7 +221,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 						async () => {
 							await this.plugin.clearSyncHistory();
 							new Notice(t('notice.resetHistory'));
-							// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 							this.display();
 						},
 					).open();
@@ -261,7 +253,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 	refreshAfterSync(): void {
 		this.updateNasDirBlockWarning();
 		if (this.containerEl.isConnected) {
-			// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 			this.display();
 		}
 	}
@@ -292,7 +283,6 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 				toggle.setValue(true).onChange((value) => {
 					this.diagnosticsVisible = value;
 					if (!value) {
-						// eslint-disable-next-line @typescript-eslint/no-deprecated -- Path B dual support: <1.13.0 fallback
 						this.display();
 					}
 				}),
@@ -306,257 +296,11 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 					this.plugin.settings.debugLogging = value;
 					await this.plugin.saveSettings();
 					if (value) {
-						// eslint-disable-next-line obsidianmd/rule-custom-message -- Confirms user-enabled diagnostics are active.
-						console.log('[UGREEN Sync] debug logging enabled');
+						console.debug('[UGREEN Sync] debug logging enabled');
 					}
 				}),
 			);
 	}
-
-	// ---- Declarative settings (Obsidian 1.13.0+ only) ----
-	/* eslint-disable obsidianmd/no-unsupported-api -- Path B: 1.13.0+ APIs only invoked on supporting versions */
-
-	getSettingDefinitions(): ReturnType<PluginSettingTab['getSettingDefinitions']> {
-		return [
-			{
-				type: 'group' as const,
-				items: [
-					{
-						name: t('settings.connection'),
-						render: (_setting: Setting, _group: SettingGroup) => {
-							const isSignedIn = this.plugin.settings.session !== undefined;
-							_setting.setName(isSignedIn ? t('settings.signedIn') : t('settings.notSignedIn'));
-							_setting.setDesc(
-								isSignedIn
-									? formatConnectionDesc(
-											this.plugin.settings.url,
-											this.plugin.settings.ugreenLinkId,
-											this.plugin.settings.username,
-										)
-									: t('settings.signInBeforeSync'),
-							);
-							_setting.addButton((button) => {
-								if (isSignedIn) {
-									button.setButtonText(t('settings.logOut')).onClick(() => {
-										new LogoutConfirmModal(
-											this.app,
-											async () => {
-												await this.plugin.logout();
-												this.update();
-											},
-										).open();
-									});
-									return;
-								}
-								button
-									.setButtonText(t('settings.signIn'))
-									.setCta()
-									.onClick(() => {
-										void this.plugin.signIn().then(() => this.update());
-									});
-							});
-						},
-					},
-				],
-			},
-			{
-				type: 'group' as const,
-				heading: t('settings.heading'),
-				items: [
-					{
-						name: t('settings.nasSyncDir'),
-						render: (setting: Setting, group: SettingGroup) => {
-							const isSignedIn = this.plugin.settings.session !== undefined;
-							setting.setDesc(t('settings.nasSyncDirDesc'));
-							setting.addText((text) => {
-								text.inputEl.disabled = !isSignedIn;
-								text
-									.setPlaceholder(isSignedIn ? t('settings.browsePlaceholder') : t('settings.signInToConfigPlaceholder'))
-									.setValue(isSignedIn ? this.plugin.settings.remoteBaseDir : '')
-									.onChange(async (value) => {
-										await this.plugin.setRemoteBaseDir(normalizeRemoteBaseDir(value));
-										this.update();
-										this.scheduleRemoteBaseDirAccessCheck(messageEl, REMOTE_BASE_DIR_CHECK_DEBOUNCE_MS);
-									});
-							});
-							setting.addButton((button) => {
-								button.buttonEl.disabled = !isSignedIn;
-								button.setButtonText(t('settings.browse')).onClick(async () => {
-									try {
-										const client = await prepareAuthenticatedUgreenClient(this.plugin.settings);
-										new RemoteDirectoryPickerModal(this.app, {
-											client,
-											initialPath: this.plugin.settings.remoteBaseDir,
-											vaultName: this.app.vault.getName(),
-											onChoose: async (path) => {
-												await this.plugin.setRemoteBaseDir(normalizeRemoteBaseDir(path));
-												this.update();
-											},
-										}).open();
-									} catch (error) {
-										new Notice(t('notice.couldNotOpenBrowser', { error: formatUgreenError(error) }), 8000);
-									}
-								});
-							});
-							const messageEl = group.listEl.createDiv({ cls: 'ugreen-sync-setting-message' });
-							this.scheduleRemoteBaseDirAccessCheck(messageEl, 0);
-
-							if (
-								this.plugin.settings.autoSyncManualBlockReason ===
-								'nas-dir-changed' &&
-								this.plugin.settings.remoteBaseDir.trim() !== ''
-							) {
-								const blockWarningEl = group.listEl.createDiv({
-									cls: 'ugreen-sync-setting-message mod-warning',
-								});
-								blockWarningEl.setText(
-									t('settings.syncBlockedNasDir', { path: this.plugin.settings.lastSyncRemoteDir }),
-								);
-							}
-						},
-					},
-					{
-						name: t('settings.autoSync'),
-						desc: getAutoSyncDescription(this.plugin.settings.hasPendingChanges, this.plugin.settings.lastLocalChangeAt),
-						control: { type: 'toggle' as const, key: 'autoSyncEnabled', disabled: () => !this.hasActionsEnabled() },
-					},
-					{
-						name: t('settings.autoSyncInterval'),
-						desc: t('settings.autoSyncIntervalDesc'),
-						control: {
-						type: 'dropdown' as const,
-							key: 'autoSyncIntervalMinutes',
-							defaultValue: String(DEFAULT_AUTO_SYNC_INTERVAL_MINUTES),
-							options: getAutoSyncIntervalOptions(),
-							disabled: () => !this.hasActionsEnabled(),
-						},
-					},
-				],
-			},
-			{
-				type: 'group' as const,
-				heading: t('settings.actions'),
-				extraButtons: [
-					(btn: ExtraButtonComponent) => {
-						btn.setIcon('lucide-ellipsis');
-						btn.setTooltip('');
-						btn.onClick(() => {
-							this.actionsHeaderClicks += 1;
-							if (this.actionsHeaderClicks >= 5) {
-								this.actionsHeaderClicks = 0;
-								this.diagnosticsVisible = true;
-								this.update();
-							}
-						});
-					},
-				],
-				items: [
-					{
-						name: t('settings.manualSync'),
-						render: (setting: Setting) => {
-							const actionsEnabled = this.hasActionsEnabled();
-							setting.setDesc(t('settings.manualSyncDesc'));
-							setting.addButton((button) => {
-								button.buttonEl.disabled = !actionsEnabled;
-								button
-									.setButtonText(t('menu.syncNow'))
-									.setCta()
-									.onClick(() => {
-										void this.plugin.syncNow();
-									});
-							});
-						},
-					},
-					{
-						name: t('settings.conflictResolver'),
-						render: (setting: Setting) => {
-							const actionsEnabled = this.hasActionsEnabled();
-							setting.setDesc(t('settings.conflictResolverDesc'));
-							setting.addButton((button) => {
-								button.buttonEl.disabled = !actionsEnabled;
-								button.setButtonText(t('settings.resolveConflicts')).onClick(() => {
-									void this.plugin.resolveConflicts();
-								});
-							});
-						},
-					},
-					{
-						name: t('settings.syncHistory'),
-						render: (setting: Setting) => {
-							const actionsEnabled = this.hasActionsEnabled();
-							setting.setDesc(
-								this.plugin.settings.lastSyncAt === 0
-									? t('settings.neverSynced')
-									: t('settings.lastSynced', { time: new Date(this.plugin.settings.lastSyncAt).toLocaleString() }),
-							);
-							setting.addButton((button) => {
-								button.buttonEl.disabled = !actionsEnabled;
-								button.setButtonText(t('settings.resetHistory')).onClick(() => {
-									new ResetHistoryConfirmModal(
-										this.app,
-										async () => {
-											await this.plugin.clearSyncHistory();
-											new Notice(t('notice.resetHistory'));
-											this.update();
-										},
-									).open();
-								});
-							});
-						},
-					},
-				],
-			},
-			{
-				type: 'group' as const,
-				heading: t('settings.diagnostics'),
-				visible: () => this.diagnosticsVisible,
-				items: [
-					{
-						name: t('settings.showDiagnostics'),
-						render: (setting: Setting) => {
-							setting.setDesc(t('settings.showDiagnosticsDesc'));
-							setting.addToggle((toggle) =>
-								toggle.setValue(true).onChange((value) => {
-									this.diagnosticsVisible = value;
-									if (!value) {
-										this.update();
-									}
-								}),
-							);
-						},
-					},
-					{
-						name: t('settings.debugLogging'),
-						desc: t('settings.debugLoggingDesc'),
-						control: { type: 'toggle' as const, key: 'debugLogging' },
-					},
-				],
-			},
-		];
-	}
-
-	setControlValue(key: string, value: unknown): void | Promise<void> {
-		switch (key) {
-			case 'autoSyncEnabled':
-				return this.plugin.setAutoSyncEnabled(value as boolean);
-			case 'autoSyncIntervalMinutes':
-				return this.plugin.setAutoSyncIntervalMinutes(normalizeAutoSyncIntervalMinutes(Number(value)));
-			case 'debugLogging':
-				this.plugin.settings.debugLogging = value as boolean;
-				return this.plugin.saveSettings();
-			default:
-				return super.setControlValue(key, value);
-		}
-	}
-
-	getControlValue(key: string): unknown {
-		if (key === 'autoSyncIntervalMinutes') {
-			return String(this.plugin.settings.autoSyncIntervalMinutes);
-		}
-		return super.getControlValue(key);
-	}
-
-	/* eslint-enable obsidianmd/no-unsupported-api */
 
 	private scheduleRemoteBaseDirAccessCheck(messageEl: HTMLElement, delay: number): void {
 		if (this.remoteBaseDirCheckTimeout !== undefined) {

@@ -3,7 +3,7 @@ import zh from './locale/zh.json';
 
 type LocaleData = typeof en;
 
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- JSON imports have implicit any type */
 const locales: Record<string, LocaleData> = {
 	en,
 	zh,

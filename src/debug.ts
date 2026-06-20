@@ -9,6 +9,5 @@ export function debugLog(
 		return;
 	}
 
-	// eslint-disable-next-line obsidianmd/rule-custom-message -- User-enabled diagnostics for debugging sync behavior.
-	console.log(`[UGREEN Sync] ${operation}`, details);
+	console.debug(`[UGREEN Sync] ${operation}`, details);
 }

@@ -33,6 +33,7 @@ export default tseslint.config(
 	...obsidianmd.configs.recommended,
 	{
 		rules: {
+			'@typescript-eslint/no-deprecated': 'off',
 			'obsidianmd/ui/sentence-case': [
 				'error',
 				{
