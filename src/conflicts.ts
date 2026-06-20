@@ -4,6 +4,12 @@ import { CONFLICTS_FOLDER } from './constants';
 type ConflictChoice = 'workspace' | 'conflict' | 'both';
 type ConflictSide = 'workspace' | 'conflict';
 
+export interface ConflictResolveResult {
+	resolvedCount: number;
+	keptBoth: boolean;
+	syncAfterResolve: boolean;
+}
+
 interface ConflictFile {
 	originalPath: string;
 	conflictPath: string;
@@ -63,11 +69,11 @@ export function openConflictPrompt(app: App, onResolve: () => void): void {
 	new ConflictPromptModal(app, onResolve).open();
 }
 
-export async function openConflictResolver(app: App, onResolved: () => void): Promise<void> {
+export async function openConflictResolver(app: App, onResolved: (result: ConflictResolveResult) => void): Promise<void> {
 	const conflicts = await getConflictFiles(app.vault);
 	if (conflicts.length === 0) {
 		new Notice('No unresolved UGREEN sync conflicts found.');
-		onResolved();
+		onResolved({ resolvedCount: 0, keptBoth: false, syncAfterResolve: false });
 		return;
 	}
 
@@ -187,6 +193,15 @@ function getConflictPanes(conflict: ConflictFile): [ConflictPane, ConflictPane] 
 	return workspaceIsOlder ? [workspacePane, conflictPane] : [conflictPane, workspacePane];
 }
 
+function getDefaultPaneIndex(panes: [ConflictPane, ConflictPane], selectedChoice: ConflictChoice | undefined): number {
+	if (selectedChoice === 'workspace' || selectedChoice === 'conflict') {
+		return panes.findIndex((pane) => pane.side === selectedChoice);
+	}
+
+	const newerIndex = panes.findIndex((pane) => pane.title === 'Newer');
+	return newerIndex === -1 ? 1 : newerIndex;
+}
+
 async function ensureParentFolder(vault: Vault, path: string): Promise<void> {
 	const parts = path.split('/');
 	parts.pop();
@@ -237,11 +252,12 @@ class ConflictResolverModal extends Modal {
 	private activePaneIndex = 1;
 	private index = 0;
 	private markdownComponent = new Component();
-	private onResolved: () => void;
+	private onResolved: (result: ConflictResolveResult) => void;
 	private previewScrollLeft = 0;
 	private previewScrollTop = 0;
+	private renderToken = 0;
 
-	constructor(app: App, conflicts: ConflictFile[], onResolved: () => void) {
+	constructor(app: App, conflicts: ConflictFile[], onResolved: (result: ConflictResolveResult) => void) {
 		super(app);
 		this.conflicts = conflicts;
 		this.onResolved = onResolved;
@@ -253,11 +269,15 @@ class ConflictResolverModal extends Modal {
 	}
 
 	onClose(): void {
+		this.renderToken += 1;
 		this.markdownComponent.unload();
 	}
 
-	private async renderCurrent(): Promise<void> {
+	private renderCurrent(): void {
+		const renderToken = this.renderToken + 1;
+		this.renderToken = renderToken;
 		this.resetMarkdownComponent();
+		const markdownComponent = this.markdownComponent;
 		if (this.index >= this.conflicts.length) {
 			this.renderConfirm();
 			return;
@@ -271,30 +291,24 @@ class ConflictResolverModal extends Modal {
 		this.setTitle('Resolve sync conflicts');
 		this.contentEl.empty();
 		this.contentEl.classList.add('ugreen-sync-conflict-content');
-		this.contentEl.createEl('p', {
-			text: `${this.index + 1} of ${this.conflicts.length}: ${conflict.originalPath}`,
-			cls: 'ugreen-sync-conflict-file-label',
-		});
+		this.renderFileHeader(conflict);
 
 		const panes = getConflictPanes(conflict);
+		const selectedChoice = this.decisions.get(conflict.conflictPath)?.choice;
+		this.activePaneIndex = getDefaultPaneIndex(panes, selectedChoice);
 		const tabsEl = this.renderPaneTabs(panes);
 		const columnsEl = this.contentEl.createDiv({ cls: 'ugreen-sync-conflict-columns' });
+		const previewRenderTasks: Promise<void>[] = [];
 		const previewEls = [
-			await this.renderPreview(columnsEl, conflict, panes[0], 0),
-			await this.renderPreview(columnsEl, conflict, panes[1], 1),
+			this.renderPreview(columnsEl, conflict, panes[0], 0, selectedChoice, markdownComponent, renderToken, previewRenderTasks),
+			this.renderPreview(columnsEl, conflict, panes[1], 1, selectedChoice, markdownComponent, renderToken, previewRenderTasks),
 		].filter((previewEl): previewEl is HTMLElement => previewEl !== null);
-		this.equalizePreviewScrollHeights(columnsEl, previewEls);
 		this.setActivePane(columnsEl, tabsEl, this.activePaneIndex);
 		this.syncPaneTabs(tabsEl, columnsEl);
 		this.syncPaneSwipe(columnsEl, tabsEl);
 		this.syncPreviewScroll(previewEls);
 
-		const bothActionsEl = this.contentEl.createDiv({ cls: 'ugreen-sync-modal-actions' });
-		new ButtonComponent(bothActionsEl)
-			.setButtonText('Keep both versions')
-			.onClick(() => {
-				this.choose(conflict, 'both');
-			});
+		this.renderBothAction(conflict, selectedChoice);
 
 		const secondaryActionsEl = this.contentEl.createDiv({ cls: 'ugreen-sync-modal-actions' });
 		new ButtonComponent(secondaryActionsEl)
@@ -307,15 +321,59 @@ class ConflictResolverModal extends Modal {
 			.onClick(() => {
 				this.renderConfirm();
 			});
+		confirmSelectedButton.buttonEl.classList.add('ugreen-sync-conflict-confirm-selected');
 		confirmSelectedButton.buttonEl.disabled = this.decisions.size === 0;
+		void Promise.all(previewRenderTasks).then(() => {
+			if (renderToken !== this.renderToken || !columnsEl.isConnected) {
+				return;
+			}
+
+			this.equalizePreviewScrollHeights(columnsEl, previewEls);
+			this.applyActivePreviewScroll(columnsEl);
+		});
 	}
 
-	private async renderPreview(
+	private renderFileHeader(conflict: ConflictFile): void {
+		const headerEl = this.contentEl.createDiv({ cls: 'ugreen-sync-conflict-file-header' });
+		const previousButton = new ButtonComponent(headerEl)
+			.setButtonText('‹')
+			.onClick(() => {
+				this.goToIndex(this.index - 1);
+			});
+		previousButton.buttonEl.setAttribute('aria-label', 'Previous conflict');
+		previousButton.buttonEl.setAttribute('title', 'Previous conflict');
+		previousButton.buttonEl.disabled = this.index === 0;
+
+		headerEl.createEl('span', {
+			text: `${this.index + 1} of ${this.conflicts.length}`,
+			cls: 'ugreen-sync-conflict-file-count',
+		});
+
+		const nextButton = new ButtonComponent(headerEl)
+			.setButtonText('›')
+			.onClick(() => {
+				this.goToIndex(this.index + 1);
+			});
+		nextButton.buttonEl.setAttribute('aria-label', 'Next conflict');
+		nextButton.buttonEl.setAttribute('title', 'Next conflict');
+		nextButton.buttonEl.disabled = this.index >= this.conflicts.length - 1;
+
+		this.contentEl.createEl('p', {
+			text: conflict.originalPath,
+			cls: 'ugreen-sync-conflict-file-label',
+		});
+	}
+
+	private renderPreview(
 		containerEl: HTMLElement,
 		conflict: ConflictFile,
 		pane: ConflictPane,
 		paneIndex: number,
-	): Promise<HTMLElement | null> {
+		selectedChoice: ConflictChoice | undefined,
+		markdownComponent: Component,
+		renderToken: number,
+		previewRenderTasks: Promise<void>[],
+	): HTMLElement | null {
 		const side = pane.side;
 		const path = side === 'workspace' ? conflict.originalPath : conflict.conflictPath;
 		const mtime = side === 'workspace' ? conflict.workspaceMtime : conflict.conflictMtime;
@@ -323,6 +381,9 @@ class ConflictResolverModal extends Modal {
 		const isMarkdown = isMarkdownFile(conflict.originalPath);
 		const columnEl = containerEl.createDiv({ cls: 'ugreen-sync-conflict-column' });
 		columnEl.dataset.paneIndex = String(paneIndex);
+		columnEl.dataset.side = side;
+		columnEl.toggleClass('is-active', paneIndex === this.activePaneIndex);
+		columnEl.toggleClass('is-choice-selected', selectedChoice === side);
 		const headerEl = columnEl.createDiv({ cls: 'ugreen-sync-conflict-header' });
 		headerEl.createEl('h3', { text: pane.title });
 		if (side === 'workspace') {
@@ -331,19 +392,55 @@ class ConflictResolverModal extends Modal {
 		columnEl.createEl('p', { text: formatMtime(mtime), cls: 'ugreen-sync-conflict-time' });
 
 		if (isMarkdown) {
-			const preview = await readPreview(this.app.vault, path);
 			const previewEl = columnEl.createDiv({ cls: 'ugreen-sync-conflict-preview' });
 			previewEl.classList.add('markdown-rendered');
-			await MarkdownRenderer.render(this.app, preview, previewEl, conflict.originalPath, this.markdownComponent);
-			previewEl.createDiv({ cls: 'ugreen-sync-conflict-preview-spacer' });
-			this.renderPreviewActions(columnEl, conflict, side);
+			previewEl.createEl('p', { text: 'Loading preview...', cls: 'ugreen-sync-conflict-preview-loading' });
+			this.renderPreviewActions(columnEl, conflict, side, selectedChoice);
+			previewRenderTasks.push(this.renderMarkdownPreview(previewEl, path, conflict.originalPath, markdownComponent, renderToken));
 			return previewEl;
 		} else {
 			columnEl.createEl('p', { text: formatSize(size) });
 		}
 
-		this.renderPreviewActions(columnEl, conflict, side);
+		this.renderPreviewActions(columnEl, conflict, side, selectedChoice);
 		return null;
+	}
+
+	private async renderMarkdownPreview(
+		previewEl: HTMLElement,
+		path: string,
+		sourcePath: string,
+		markdownComponent: Component,
+		renderToken: number,
+	): Promise<void> {
+		let preview: string;
+		try {
+			preview = await readPreview(this.app.vault, path);
+		} catch {
+			if (renderToken === this.renderToken && previewEl.isConnected) {
+				previewEl.setText('Unable to load preview.');
+			}
+			return;
+		}
+
+		if (renderToken !== this.renderToken || !previewEl.isConnected) {
+			return;
+		}
+
+		previewEl.empty();
+		try {
+			await MarkdownRenderer.render(this.app, preview, previewEl, sourcePath, markdownComponent);
+		} catch {
+			if (renderToken === this.renderToken && previewEl.isConnected) {
+				previewEl.setText('Unable to render preview.');
+			}
+			return;
+		}
+		if (renderToken !== this.renderToken || !previewEl.isConnected) {
+			return;
+		}
+
+		previewEl.createDiv({ cls: 'ugreen-sync-conflict-preview-spacer' });
 	}
 
 	private renderPaneTabs(panes: [ConflictPane, ConflictPane]): HTMLElement {
@@ -355,7 +452,9 @@ class ConflictResolverModal extends Modal {
 				cls: 'ugreen-sync-conflict-tab',
 			});
 			tabEl.type = 'button';
+			tabEl.classList.toggle('is-active', index === this.activePaneIndex);
 			tabEl.setAttribute('role', 'tab');
+			tabEl.setAttribute('aria-selected', String(index === this.activePaneIndex));
 			tabEl.dataset.paneIndex = String(index);
 		});
 		return tabsEl;
@@ -408,14 +507,57 @@ class ConflictResolverModal extends Modal {
 		}, { passive: true });
 	}
 
-	private renderPreviewActions(columnEl: HTMLElement, conflict: ConflictFile, side: ConflictSide): void {
-		const actionsEl = columnEl.createDiv({ cls: 'ugreen-sync-modal-actions' });
-		new ButtonComponent(actionsEl)
-			.setButtonText('Keep this version')
-			.setCta()
+	private renderPreviewActions(
+		columnEl: HTMLElement,
+		conflict: ConflictFile,
+		side: ConflictSide,
+		selectedChoice: ConflictChoice | undefined,
+	): void {
+		const actionsEl = columnEl.createDiv({ cls: 'ugreen-sync-modal-actions ugreen-sync-conflict-choice-row' });
+		this.renderPreviewActionButton(actionsEl, conflict, side, selectedChoice);
+	}
+
+	private renderPreviewActionButton(
+		actionsEl: HTMLElement,
+		conflict: ConflictFile,
+		side: ConflictSide,
+		selectedChoice: ConflictChoice | undefined,
+	): void {
+		const button = new ButtonComponent(actionsEl)
+			.setButtonText(selectedChoice === side ? 'Unselect' : 'Keep this version')
 			.onClick(() => {
 				this.choose(conflict, side);
 			});
+		if (selectedChoice === side) {
+			button.setCta();
+		}
+		if (selectedChoice === side) {
+			actionsEl.createEl('span', { text: 'Your choice', cls: 'ugreen-sync-conflict-choice-lock' });
+		}
+	}
+
+	private renderBothAction(conflict: ConflictFile, selectedChoice: ConflictChoice | undefined): void {
+		const bothActionsEl = this.contentEl.createDiv({ cls: 'ugreen-sync-modal-actions ugreen-sync-conflict-keep-both-row' });
+		bothActionsEl.toggleClass('is-choice-selected', selectedChoice === 'both');
+		this.renderBothActionButton(bothActionsEl, conflict, selectedChoice);
+	}
+
+	private renderBothActionButton(
+		bothActionsEl: HTMLElement,
+		conflict: ConflictFile,
+		selectedChoice: ConflictChoice | undefined,
+	): void {
+		const button = new ButtonComponent(bothActionsEl)
+			.setButtonText(selectedChoice === 'both' ? 'Unselect keep both' : 'Keep both versions')
+			.onClick(() => {
+				this.choose(conflict, 'both');
+			});
+		if (selectedChoice === 'both') {
+			button.setCta();
+		}
+		if (selectedChoice === 'both') {
+			bothActionsEl.createEl('span', { text: 'Your choice', cls: 'ugreen-sync-conflict-choice-lock' });
+		}
 	}
 
 	private syncPreviewScroll(previewEls: HTMLElement[]): void {
@@ -485,11 +627,66 @@ class ConflictResolverModal extends Modal {
 	}
 
 	private choose(conflict: ConflictFile, choice: ConflictChoice): void {
+		const currentConflict = this.conflicts[this.index];
+		const isCurrentConflict = currentConflict?.conflictPath === conflict.conflictPath;
+		if (this.decisions.get(conflict.conflictPath)?.choice === choice) {
+			this.decisions.delete(conflict.conflictPath);
+			if (isCurrentConflict) {
+				this.updateSelectionState(conflict);
+				return;
+			}
+
+			this.renderCurrent();
+			return;
+		}
+
 		this.decisions.set(conflict.conflictPath, { conflict, choice });
+		if (isCurrentConflict) {
+			this.updateSelectionState(conflict);
+			this.index += 1;
+			this.renderCurrent();
+			return;
+		}
+
+		this.renderCurrent();
+	}
+
+	private updateSelectionState(conflict: ConflictFile): void {
+		const selectedChoice = this.decisions.get(conflict.conflictPath)?.choice;
+		this.contentEl.querySelectorAll<HTMLElement>('.ugreen-sync-conflict-column').forEach((columnEl) => {
+			const side = columnEl.dataset.side as ConflictSide | undefined;
+			if (side === undefined) {
+				return;
+			}
+
+			columnEl.toggleClass('is-choice-selected', selectedChoice === side);
+			const actionsEl = columnEl.querySelector<HTMLElement>('.ugreen-sync-conflict-choice-row');
+			if (actionsEl === null) {
+				return;
+			}
+
+			actionsEl.empty();
+			this.renderPreviewActionButton(actionsEl, conflict, side, selectedChoice);
+		});
+
+		const bothActionsEl = this.contentEl.querySelector<HTMLElement>('.ugreen-sync-conflict-keep-both-row');
+		if (bothActionsEl !== null) {
+			bothActionsEl.toggleClass('is-choice-selected', selectedChoice === 'both');
+			bothActionsEl.empty();
+			this.renderBothActionButton(bothActionsEl, conflict, selectedChoice);
+		}
+
+		const confirmSelectedButton = this.contentEl.querySelector<HTMLButtonElement>('.ugreen-sync-conflict-confirm-selected');
+		if (confirmSelectedButton !== null) {
+			confirmSelectedButton.disabled = this.decisions.size === 0;
+		}
+	}
+
+	private goToIndex(index: number): void {
 		this.activePaneIndex = 1;
 		this.previewScrollLeft = 0;
 		this.previewScrollTop = 0;
-		this.index += 1;
+		this.index = Math.max(0, Math.min(index, this.conflicts.length - 1));
 		void this.renderCurrent();
 	}
 
@@ -500,12 +697,28 @@ class ConflictResolverModal extends Modal {
 		this.setTitle('Confirm conflict resolution');
 		this.contentEl.empty();
 		this.contentEl.classList.remove('ugreen-sync-conflict-content');
+		const backActionsEl = this.contentEl.createDiv({ cls: 'ugreen-sync-modal-actions' });
+		const backButton = new ButtonComponent(backActionsEl)
+			.setButtonText('‹')
+			.onClick(() => {
+				this.index = Math.min(this.decisions.size, this.conflicts.length - 1);
+				void this.renderCurrent();
+			});
+		backButton.buttonEl.setAttribute('aria-label', 'Back to resolver');
+		backButton.buttonEl.setAttribute('title', 'Back to resolver');
 		this.contentEl.createEl('p', {
 			text: `${decisions.length} of ${this.conflicts.length} conflict files selected.`,
 		});
 		this.contentEl.createEl('p', { text: `${counts.older} older versions selected.` });
 		this.contentEl.createEl('p', { text: `${counts.newer} newer versions selected.` });
 		this.contentEl.createEl('p', { text: `${counts.both} files selected to keep both versions.` });
+		const resolveAndSyncDisabledReason = getResolveAndSyncDisabledReason(decisions.length, this.conflicts.length, counts.both);
+		if (resolveAndSyncDisabledReason !== undefined) {
+			this.contentEl.createEl('p', {
+				text: resolveAndSyncDisabledReason,
+				cls: 'ugreen-sync-conflict-sync-banner',
+			});
+		}
 		if (decisions.length < this.conflicts.length) {
 			this.contentEl.createEl('p', {
 				text: `${this.conflicts.length - decisions.length} conflict files will remain unresolved.`,
@@ -514,27 +727,48 @@ class ConflictResolverModal extends Modal {
 
 		const actionsEl = this.contentEl.createDiv({ cls: 'ugreen-sync-modal-actions' });
 		new ButtonComponent(actionsEl)
-			.setButtonText('Back')
-			.onClick(() => {
-				this.index = Math.min(this.decisions.size, this.conflicts.length - 1);
-				void this.renderCurrent();
-			});
-		new ButtonComponent(actionsEl)
 			.setButtonText('Cancel resolve')
 			.onClick(() => {
 				this.close();
 			});
-		const confirmButton = new ButtonComponent(actionsEl)
-			.setButtonText('Confirm resolve')
+		const resolveButton = new ButtonComponent(actionsEl)
+			.setButtonText('Resolve')
+			.onClick(async () => {
+				await this.resolve(decisions, false);
+			});
+		resolveButton.buttonEl.disabled = decisions.length === 0;
+		const resolveAndSyncButton = new ButtonComponent(actionsEl)
+			.setButtonText('Resolve and sync')
 			.setCta()
 			.onClick(async () => {
-				await applyDecisions(this.app.vault, decisions);
-				new Notice(`Resolved ${decisions.length} ugreen sync conflict files.`);
-				this.onResolved();
-				this.close();
+				await this.resolve(decisions, true);
 			});
-		confirmButton.buttonEl.disabled = decisions.length === 0;
+		resolveAndSyncButton.buttonEl.disabled = resolveAndSyncDisabledReason !== undefined;
 	}
+
+	private async resolve(decisions: ConflictDecision[], syncAfterResolve: boolean): Promise<void> {
+		const counts = getDecisionCounts(decisions);
+		await applyDecisions(this.app.vault, decisions);
+		new Notice(`Resolved ${decisions.length} UGREEN sync conflict files.`);
+		this.onResolved({
+			resolvedCount: decisions.length,
+			keptBoth: counts.both > 0,
+			syncAfterResolve,
+		});
+		this.close();
+	}
+}
+
+function getResolveAndSyncDisabledReason(selectedCount: number, totalCount: number, keepBothCount: number): string | undefined {
+	if (selectedCount < totalCount) {
+		return 'Resolve and sync is disabled until every conflict file has a choice. You can resolve selected files now and resolve the rest later.';
+	}
+
+	if (keepBothCount > 0) {
+		return 'Resolve and sync is disabled because keep both needs manual review. Select Resolve, review the copied files, then sync manually.';
+	}
+
+	return undefined;
 }
 
 function getDecisionCounts(decisions: ConflictDecision[]): { older: number; newer: number; both: number } {

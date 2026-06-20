@@ -160,7 +160,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 
 		new Setting(actionsCard)
 			.setName('Conflict resolver')
-			.setDesc('Review files in .conflicts and choose which versions to keep.')
+			.setDesc('Conflicted files are stored in .conflicts. You can resolve them using the resolver, or manually clear out the .conflicts folder.')
 			.addButton((button) => {
 				actionButtons.push(button.buttonEl);
 				button.buttonEl.disabled = !actionsEnabled;

@@ -1,14 +1,38 @@
-import { Menu, Notice, Plugin, setIcon, type App, type IconName, type TAbstractFile } from 'obsidian';
+import {
+	Menu,
+	Notice,
+	Plugin,
+	setIcon,
+	type App,
+	type IconName,
+	type TAbstractFile,
+} from 'obsidian';
 import { openUgreenLoginModal } from './login';
 import { UgreenSyncSettingTab } from './settings';
-import { DEFAULT_SETTINGS, SyncProgress, SyncResult, UgreenSyncSettings } from './types';
+import {
+	DEFAULT_SETTINGS,
+	SyncProgress,
+	SyncResult,
+	UgreenSyncSettings,
+} from './types';
 import { runSync } from './sync';
-import { formatUgreenError, getRemoteBaseDirAccessError, hasValidUgreenSession, logUgreenError } from './ugreen';
-import { getConflictFiles, hasUnresolvedConflicts, openConflictPrompt, openConflictResolver } from './conflicts';
+import {
+	formatUgreenError,
+	getRemoteBaseDirAccessError,
+	hasValidUgreenSession,
+	logUgreenError,
+} from './ugreen';
+import {
+	getConflictFiles,
+	hasUnresolvedConflicts,
+	openConflictPrompt,
+	openConflictResolver,
+} from './conflicts';
 import { debugLog } from './debug';
 import { CONFLICTS_FOLDER } from './constants';
 
-const AUTO_SYNC_DISABLED_NOTICE = 'To prevent data corruption while changing settings. Auto-sync has been turned off';
+const AUTO_SYNC_DISABLED_NOTICE =
+	'To prevent data corruption while changing settings. Auto-sync has been turned off';
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
 const AUTO_SYNC_INTERVAL_OPTIONS = [1, 5, 15, 30, 60] as const;
 const LOCAL_CHANGE_SAVE_DEBOUNCE_MS = 500;
@@ -46,7 +70,9 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.setStatus({ label: 'Checking', kind: 'running' });
 		void this.checkLoginOnLaunch();
 		void this.updateConflictStatus();
-		this.app.workspace.onLayoutReady(() => this.registerVaultChangeHandlers());
+		this.app.workspace.onLayoutReady(() =>
+			this.registerVaultChangeHandlers(),
+		);
 		this.registerAutoSyncLifecycleHandlers();
 		this.configureAutoSyncInterval();
 		this.register(() => {
@@ -82,6 +108,8 @@ export default class UgreenSyncPlugin extends Plugin {
 		const showSuccessNotice = options.showSuccessNotice ?? true;
 		const promptOnConflicts = options.promptOnConflicts ?? true;
 		const allowLoginPrompt = options.allowLoginPrompt ?? true;
+		const clearAutoSyncManualBlock =
+			options.clearAutoSyncManualBlock ?? true;
 		if (!this.isSignedIn()) {
 			this.setStatus({ label: 'Logged out', kind: 'warning' });
 			if (showInfoNotices) {
@@ -121,20 +149,33 @@ export default class UgreenSyncPlugin extends Plugin {
 
 		const remoteBaseDir = this.settings.remoteBaseDir;
 		try {
+			if (clearAutoSyncManualBlock) {
+				await this.clearAutoSyncManualBlock();
+			}
 			this.syncInProgress = true;
 			this.setStatus({ label: 'Syncing', kind: 'running' });
 
-			const result = await runSync(this.app.vault, this.settings, (progress) => {
-				this.setStatus({
-					label: 'Syncing',
-					kind: 'running',
-					progress: getSyncProgressPercent(progress),
-				});
-			});
+			const result = await runSync(
+				this.app.vault,
+				this.settings,
+				(progress) => {
+					this.setStatus({
+						label: 'Syncing',
+						kind: 'running',
+						progress: getSyncProgressPercent(progress),
+					});
+				},
+			);
 			if (this.settings.remoteBaseDir !== remoteBaseDir) {
-				this.setStatus({ label: 'NAS directory changed', kind: 'warning' });
+				this.setStatus({
+					label: 'NAS directory changed',
+					kind: 'warning',
+				});
 				if (showInfoNotices) {
-					new Notice('NAS sync directory changed during sync. Sync history was not updated.', 8000);
+					new Notice(
+						'NAS sync directory changed during sync. Sync history was not updated.',
+						8000,
+					);
 				}
 				return false;
 			}
@@ -146,13 +187,19 @@ export default class UgreenSyncPlugin extends Plugin {
 
 			this.setStatus(formatSyncStatusMessage(result));
 			if (showSuccessNotice) {
-				new Notice(formatSyncSuccessNotice(result, this.app.vault.getName()));
+				new Notice(
+					formatSyncSuccessNotice(result, this.app.vault.getName()),
+				);
 			}
 			return true;
 		} catch (error) {
 			const errorMessage = formatUgreenError(error);
 			logUgreenError('sync failed', error);
-			this.setStatus({ label: 'Failed', details: [errorMessage], kind: 'error' });
+			this.setStatus({
+				label: 'Failed',
+				details: [errorMessage],
+				kind: 'error',
+			});
 			new Notice(`UGREEN sync failed: ${errorMessage}`, 8000);
 			return false;
 		} finally {
@@ -173,9 +220,23 @@ export default class UgreenSyncPlugin extends Plugin {
 			return;
 		}
 
-		await openConflictResolver(this.app, () => {
-			void this.updateConflictStatus();
+		await openConflictResolver(this.app, (result) => {
+			void this.afterConflictResolve(result);
 		});
+	}
+
+	private async afterConflictResolve(result: {
+		keptBoth: boolean;
+		syncAfterResolve: boolean;
+	}): Promise<void> {
+		if (result.keptBoth) {
+			await this.blockAutoSyncUntilManualSync();
+		}
+
+		await this.updateConflictStatus();
+		if (result.syncAfterResolve) {
+			void this.syncNow({ promptOnConflicts: false });
+		}
 	}
 
 	async signIn(): Promise<boolean> {
@@ -214,7 +275,9 @@ export default class UgreenSyncPlugin extends Plugin {
 			hasSession: this.settings.session !== undefined,
 		});
 		if (this.settings.session === undefined) {
-			debugLog(this.settings, 'startup session check skipped', { reason: 'missing session' });
+			debugLog(this.settings, 'startup session check skipped', {
+				reason: 'missing session',
+			});
 			this.disableAutoSyncForSafety();
 			await this.saveSettings();
 			this.setStatus({ label: 'Logged out', kind: 'warning' });
@@ -255,7 +318,10 @@ export default class UgreenSyncPlugin extends Plugin {
 				}
 			} catch (error) {
 				logUgreenError('session check failed', error);
-				new Notice(`UGREEN NAS session check failed: ${formatUgreenError(error)}`, 8000);
+				new Notice(
+					`UGREEN NAS session check failed: ${formatUgreenError(error)}`,
+					8000,
+				);
 				return false;
 			}
 
@@ -283,6 +349,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.settings.remoteBaseDir = remoteBaseDir;
 		this.settings.syncState = {};
 		this.settings.lastSyncAt = 0;
+		this.settings.autoSyncManualBlockReason = undefined;
 		this.settings.hasPendingChanges = false;
 		this.settings.lastLocalChangeAt = 0;
 		this.disableAutoSyncForSafety();
@@ -292,18 +359,30 @@ export default class UgreenSyncPlugin extends Plugin {
 
 	async setAutoSyncEnabled(enabled: boolean): Promise<void> {
 		if (enabled && (!this.isSignedIn() || !this.hasRemoteBaseDir())) {
-			new Notice('Sign in and set a NAS sync directory before enabling auto-sync.');
+			new Notice(
+				'Sign in and set a NAS sync directory before enabling auto-sync.',
+			);
 			enabled = false;
 		}
 
 		this.settings.autoSyncEnabled = enabled;
-		this.settings.autoSyncIntervalMinutes = normalizeAutoSyncIntervalMinutes(this.settings.autoSyncIntervalMinutes);
+		this.settings.autoSyncIntervalMinutes =
+			normalizeAutoSyncIntervalMinutes(
+				this.settings.autoSyncIntervalMinutes,
+			);
+		if (!enabled) {
+			this.settings.autoSyncManualBlockReason = undefined;
+		}
 		await this.saveSettings();
 		this.configureAutoSyncInterval();
+		if (enabled && this.hasAutoSyncManualBlock()) {
+			this.setAutoSyncManualBlockStatus();
+		}
 	}
 
 	async setAutoSyncIntervalMinutes(minutes: number): Promise<void> {
-		this.settings.autoSyncIntervalMinutes = normalizeAutoSyncIntervalMinutes(minutes);
+		this.settings.autoSyncIntervalMinutes =
+			normalizeAutoSyncIntervalMinutes(minutes);
 		await this.saveSettings();
 		this.configureAutoSyncInterval();
 	}
@@ -314,18 +393,24 @@ export default class UgreenSyncPlugin extends Plugin {
 		}
 
 		try {
-			const accessError = await getRemoteBaseDirAccessError(this.settings);
+			const accessError = await getRemoteBaseDirAccessError(
+				this.settings,
+			);
 			if (accessError !== undefined) {
 				new Notice(accessError, 8000);
 			}
 		} catch (error) {
 			logUgreenError('remote base directory access check failed', error);
-			new Notice(`Could not check NAS sync directory access: ${formatUgreenError(error)}`, 8000);
+			new Notice(
+				`Could not check NAS sync directory access: ${formatUgreenError(error)}`,
+				8000,
+			);
 		}
 	}
 
 	async loadSettings() {
-		const savedData = ((await this.loadData()) ?? {}) as Partial<UgreenSyncSettings>;
+		const savedData = ((await this.loadData()) ??
+			{}) as Partial<UgreenSyncSettings>;
 		const savedSettings = Object.fromEntries(
 			Object.entries({
 				url: savedData.url,
@@ -335,6 +420,7 @@ export default class UgreenSyncPlugin extends Plugin {
 				remoteBaseDir: savedData.remoteBaseDir,
 				autoSyncEnabled: savedData.autoSyncEnabled,
 				autoSyncIntervalMinutes: savedData.autoSyncIntervalMinutes,
+				autoSyncManualBlockReason: savedData.autoSyncManualBlockReason,
 				hasPendingChanges: savedData.hasPendingChanges,
 				lastLocalChangeAt: savedData.lastLocalChangeAt,
 				debugLogging: savedData.debugLogging,
@@ -343,14 +429,13 @@ export default class UgreenSyncPlugin extends Plugin {
 			}).filter(([, value]) => value !== undefined),
 		) as Partial<UgreenSyncSettings>;
 		if (savedSettings.autoSyncIntervalMinutes !== undefined) {
-			savedSettings.autoSyncIntervalMinutes = normalizeAutoSyncIntervalMinutes(savedSettings.autoSyncIntervalMinutes);
+			savedSettings.autoSyncIntervalMinutes =
+				normalizeAutoSyncIntervalMinutes(
+					savedSettings.autoSyncIntervalMinutes,
+				);
 		}
 
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			savedSettings,
-		);
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, savedSettings);
 	}
 
 	async saveSettings() {
@@ -362,6 +447,7 @@ export default class UgreenSyncPlugin extends Plugin {
 			remoteBaseDir: this.settings.remoteBaseDir,
 			autoSyncEnabled: this.settings.autoSyncEnabled,
 			autoSyncIntervalMinutes: this.settings.autoSyncIntervalMinutes,
+			autoSyncManualBlockReason: this.settings.autoSyncManualBlockReason,
 			hasPendingChanges: this.settings.hasPendingChanges,
 			lastLocalChangeAt: this.settings.lastLocalChangeAt,
 			debugLogging: this.settings.debugLogging,
@@ -383,12 +469,19 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private registerAutoSyncLifecycleHandlers(): void {
-		this.registerEvent(this.app.workspace.on('quit', () => {
-			void this.runAutoSync('quit');
-		}));
+		this.registerEvent(
+			this.app.workspace.on('quit', () => {
+				void this.runAutoSync('quit');
+			}),
+		);
 		this.registerDomEvent(activeDocument, 'visibilitychange', () => {
-			if (activeDocument.visibilityState === 'hidden' && this.settings.hasPendingChanges) {
-				void this.runAutoSync('visibility change', { requirePendingChanges: true });
+			if (
+				activeDocument.visibilityState === 'hidden' &&
+				this.settings.hasPendingChanges
+			) {
+				void this.runAutoSync('visibility change', {
+					requirePendingChanges: true,
+				});
 			}
 		});
 		this.registerDomEvent(activeWindow, 'pagehide', () => {
@@ -416,11 +509,21 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.autoSyncIntervalId = undefined;
 	}
 
-	private async runAutoSync(source: AutoSyncSource, options: AutoSyncOptions = {}): Promise<boolean> {
+	private async runAutoSync(
+		source: AutoSyncSource,
+		options: AutoSyncOptions = {},
+	): Promise<boolean> {
 		if (!this.settings.autoSyncEnabled || this.autoSyncQueued) {
 			return false;
 		}
-		if (options.requirePendingChanges === true && !this.settings.hasPendingChanges) {
+		if (this.hasAutoSyncManualBlock()) {
+			this.setAutoSyncManualBlockStatus();
+			return false;
+		}
+		if (
+			options.requirePendingChanges === true &&
+			!this.settings.hasPendingChanges
+		) {
 			return false;
 		}
 		if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
@@ -432,6 +535,7 @@ export default class UgreenSyncPlugin extends Plugin {
 			debugLog(this.settings, 'auto sync trigger', { source });
 			return await this.syncNow({
 				allowLoginPrompt: false,
+				clearAutoSyncManualBlock: false,
 				promptOnConflicts: false,
 				showInfoNotices: false,
 				showSuccessNotice: false,
@@ -442,13 +546,25 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private markLocalChanged(file: TAbstractFile, oldPath?: string): void {
-		if (this.syncInProgress || !shouldTrackLocalChange(file.path, oldPath)) {
+		if (
+			this.syncInProgress ||
+			!shouldTrackLocalChange(file.path, oldPath)
+		) {
 			return;
 		}
 
 		this.settings.hasPendingChanges = true;
 		this.settings.lastLocalChangeAt = Date.now();
-		this.setStatus({ label: 'Changed', details: ['Local changes not synced'], kind: 'warning' });
+		if (this.hasAutoSyncManualBlock()) {
+			this.setAutoSyncManualBlockStatus();
+			this.schedulePendingChangeSave();
+			return;
+		}
+		this.setStatus({
+			label: 'Changed',
+			details: ['Local changes not synced'],
+			kind: 'warning',
+		});
 		this.schedulePendingChangeSave();
 	}
 
@@ -469,9 +585,12 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.pendingChangeSaveTimeout = undefined;
 	}
 
-	private updatePendingChangesFromSyncState(syncState: Record<string, UgreenSyncSettings['syncState'][string]>): void {
+	private updatePendingChangesFromSyncState(
+		syncState: Record<string, UgreenSyncSettings['syncState'][string]>,
+	): void {
 		const localFiles = new Map(
-			this.app.vault.getFiles()
+			this.app.vault
+				.getFiles()
 				.filter((file) => shouldTrackLocalChange(file.path))
 				.map((file) => [file.path, file]),
 		);
@@ -507,13 +626,23 @@ export default class UgreenSyncPlugin extends Plugin {
 		}
 
 		this.settings.autoSyncEnabled = false;
+		this.settings.autoSyncManualBlockReason = undefined;
 		this.clearAutoSyncInterval();
 		new Notice(AUTO_SYNC_DISABLED_NOTICE, 8000);
 	}
 
 	private setSignedInIdleStatus(label: string): void {
+		if (this.hasAutoSyncManualBlock()) {
+			this.setAutoSyncManualBlockStatus();
+			return;
+		}
+
 		if (this.settings.hasPendingChanges) {
-			this.setStatus({ label: 'Changed', details: ['Local changes not synced'], kind: 'warning' });
+			this.setStatus({
+				label: 'Changed',
+				details: ['Local changes not synced'],
+				kind: 'warning',
+			});
 			return;
 		}
 
@@ -529,21 +658,42 @@ export default class UgreenSyncPlugin extends Plugin {
 		const statusClass = this.getStatusClass(status);
 		const statusIcon = this.getStatusIcon(status);
 
-		this.statusBarItem.toggleClass('ugreen-sync-status-running', statusClass === 'ugreen-sync-status-running');
-		this.statusBarItem.toggleClass('ugreen-sync-status-warning', statusClass === 'ugreen-sync-status-warning');
-		this.statusBarItem.toggleClass('ugreen-sync-status-success', statusClass === 'ugreen-sync-status-success');
-		this.statusBarItem.toggleClass('ugreen-sync-conflict-status', statusClass === 'ugreen-sync-conflict-status');
+		this.statusBarItem.toggleClass(
+			'ugreen-sync-status-running',
+			statusClass === 'ugreen-sync-status-running',
+		);
+		this.statusBarItem.toggleClass(
+			'ugreen-sync-status-warning',
+			statusClass === 'ugreen-sync-status-warning',
+		);
+		this.statusBarItem.toggleClass(
+			'ugreen-sync-status-success',
+			statusClass === 'ugreen-sync-status-success',
+		);
+		this.statusBarItem.toggleClass(
+			'ugreen-sync-conflict-status',
+			statusClass === 'ugreen-sync-conflict-status',
+		);
 		this.updateStatusIcon(statusIcon, status.progress);
-		this.statusBarItem.setAttribute('aria-label', `${statusText}. Open UGREEN sync menu`);
+		this.statusBarItem.setAttribute(
+			'aria-label',
+			`${statusText}. Open UGREEN sync menu`,
+		);
 		this.statusBarItem.setAttribute('title', statusText);
 	}
 
-	private updateStatusIcon(iconName: IconName, progress: number | undefined): void {
+	private updateStatusIcon(
+		iconName: IconName,
+		progress: number | undefined,
+	): void {
 		if (this.statusBarItem === undefined) {
 			return;
 		}
 
-		if (this.statusIconEl === undefined || this.statusIconName !== iconName) {
+		if (
+			this.statusIconEl === undefined ||
+			this.statusIconName !== iconName
+		) {
 			this.statusBarItem.empty();
 			this.statusProgressEl = undefined;
 			this.statusIconEl = activeDocument.createElement('span');
@@ -575,25 +725,26 @@ export default class UgreenSyncPlugin extends Plugin {
 
 		menu.setUseNativeMenu(false);
 		menu.addItem((item) => {
-			item
-				.setTitle(this.createStatusMenuTitle())
+			item.setTitle(this.createStatusMenuTitle())
 				.setIsLabel(true)
 				.setSection('ugreen-sync-status');
 		});
 		menu.addSeparator();
 		menu.addItem((item) => {
-			item
-				.setTitle('Sync now')
+			item.setTitle('Sync now')
 				.setIcon('sync')
-				.setDisabled(!this.isSignedIn() || !this.hasRemoteBaseDir() || this.syncInProgress)
+				.setDisabled(
+					!this.isSignedIn() ||
+						!this.hasRemoteBaseDir() ||
+						this.syncInProgress,
+				)
 				.onClick(() => {
 					void this.syncNow();
 				});
 		});
 		if (isConflictStatus(this.latestStatus)) {
 			menu.addItem((item) => {
-				item
-					.setTitle('Resolve conflicts')
+				item.setTitle('Resolve conflicts')
 					.setIcon('git-pull-request')
 					.onClick(() => {
 						void this.resolveConflicts();
@@ -601,8 +752,7 @@ export default class UgreenSyncPlugin extends Plugin {
 			});
 		}
 		menu.addItem((item) => {
-			item
-				.setTitle('Settings')
+			item.setTitle('Settings')
 				.setIcon('settings')
 				.onClick(() => {
 					this.openSettings();
@@ -616,6 +766,11 @@ export default class UgreenSyncPlugin extends Plugin {
 		const fragment = activeDocument.createDocumentFragment();
 		const statusEl = activeDocument.createElement('div');
 		statusEl.addClass('ugreen-sync-menu-status');
+
+		const bannerEl = activeDocument.createElement('div');
+		bannerEl.addClass('ugreen-sync-menu-status-banner');
+		bannerEl.setText('UGREEN NAS Sync');
+		statusEl.append(bannerEl);
 
 		const headingEl = activeDocument.createElement('div');
 		headingEl.addClass('ugreen-sync-menu-status-heading');
@@ -640,6 +795,9 @@ export default class UgreenSyncPlugin extends Plugin {
 		if (status.kind === 'error') {
 			return 'alert-triangle';
 		}
+		if (status.kind === 'blocked') {
+			return 'pause-circle';
+		}
 		if (status.kind === 'warning') {
 			return 'alert-circle';
 		}
@@ -657,7 +815,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		if (status.kind === 'error') {
 			return 'ugreen-sync-conflict-status';
 		}
-		if (status.kind === 'warning') {
+		if (status.kind === 'warning' || status.kind === 'blocked') {
 			return 'ugreen-sync-status-warning';
 		}
 
@@ -670,11 +828,13 @@ export default class UgreenSyncPlugin extends Plugin {
 			return;
 		}
 
-		this.showStatusMenu(new MouseEvent('click', {
-			clientX: rect.left,
-			clientY: rect.top,
-			view: activeWindow,
-		}));
+		this.showStatusMenu(
+			new MouseEvent('click', {
+				clientX: rect.left,
+				clientY: rect.top,
+				view: activeWindow,
+			}),
+		);
 	}
 
 	private openSettings(): void {
@@ -689,6 +849,10 @@ export default class UgreenSyncPlugin extends Plugin {
 	}
 
 	private async updateConflictStatus() {
+		if (this.syncInProgress) {
+			return;
+		}
+
 		if (!this.isSignedIn() || !this.hasRemoteBaseDir()) {
 			this.statusBarItem?.removeClass('ugreen-sync-conflict-status');
 			return;
@@ -698,15 +862,52 @@ export default class UgreenSyncPlugin extends Plugin {
 		const conflictStatus = createConflictStatus(conflictCount);
 		if (conflictCount > 0) {
 			this.setStatus(conflictStatus);
+		} else if (this.hasAutoSyncManualBlock()) {
+			this.setAutoSyncManualBlockStatus();
 		} else if (isConflictStatus(this.latestStatus)) {
 			this.setSignedInIdleStatus('Ready');
 		} else {
 			this.statusBarItem?.removeClass('ugreen-sync-conflict-status');
 		}
 	}
+
+	private async blockAutoSyncUntilManualSync(): Promise<void> {
+		if (!this.settings.autoSyncEnabled) {
+			return;
+		}
+
+		this.settings.autoSyncManualBlockReason =
+			'keep-both-conflict-resolution';
+		await this.saveSettings();
+		this.setAutoSyncManualBlockStatus();
+	}
+
+	private async clearAutoSyncManualBlock(): Promise<void> {
+		if (!this.hasAutoSyncManualBlock()) {
+			return;
+		}
+
+		this.settings.autoSyncManualBlockReason = undefined;
+		await this.saveSettings();
+	}
+
+	private hasAutoSyncManualBlock(): boolean {
+		return (
+			this.settings.autoSyncEnabled &&
+			this.settings.autoSyncManualBlockReason !== undefined
+		);
+	}
+
+	private setAutoSyncManualBlockStatus(): void {
+		this.setStatus({
+			label: 'Manual sync required',
+			details: ['Auto-sync paused after keep both conflict resolution'],
+			kind: 'blocked',
+		});
+	}
 }
 
-type SyncStatusKind = 'running' | 'warning' | 'success' | 'error';
+type SyncStatusKind = 'running' | 'warning' | 'success' | 'error' | 'blocked';
 
 type AutoSyncSource = 'launch' | 'quit' | 'visibility change' | 'interval';
 
@@ -716,6 +917,7 @@ interface AutoSyncOptions {
 
 interface SyncNowOptions {
 	allowLoginPrompt?: boolean;
+	clearAutoSyncManualBlock?: boolean;
 	promptOnConflicts?: boolean;
 	showInfoNotices?: boolean;
 	showSuccessNotice?: boolean;
@@ -786,7 +988,10 @@ function getSyncProgressPercent(progress: SyncProgress): number {
 		return 100;
 	}
 
-	return Math.min(100, Math.max(0, Math.round((progress.completed / progress.total) * 100)));
+	return Math.min(
+		100,
+		Math.max(0, Math.round((progress.completed / progress.total) * 100)),
+	);
 }
 
 function formatSyncStatusMessage(result: SyncResult): SyncStatus {
@@ -805,7 +1010,10 @@ function formatSyncStatusMessage(result: SyncResult): SyncStatus {
 	return { label: 'Synced', details: stats, kind: 'success' };
 }
 
-function formatSyncSuccessNotice(result: SyncResult, vaultName: string): string {
+function formatSyncSuccessNotice(
+	result: SyncResult,
+	vaultName: string,
+): string {
 	const stats = [
 		formatSyncStat(result.uploaded, 'uploaded'),
 		formatSyncStat(result.downloaded, 'downloaded'),
@@ -821,7 +1029,11 @@ function formatSyncSuccessNotice(result: SyncResult, vaultName: string): string 
 	return `${vaultName}: ${stats.join(', ')}.`;
 }
 
-function formatSyncStat(count: number, label: string, pluralLabel = label): string | undefined {
+function formatSyncStat(
+	count: number,
+	label: string,
+	pluralLabel = label,
+): string | undefined {
 	if (count === 0) {
 		return undefined;
 	}
@@ -834,14 +1046,17 @@ function getAutoSyncIntervalMs(minutes: number): number {
 }
 
 function normalizeAutoSyncIntervalMinutes(minutes: number): number {
-	if (!Number.isFinite(minutes) || !AUTO_SYNC_INTERVAL_OPTIONS.includes(minutes as AutoSyncIntervalOption)) {
+	if (
+		!Number.isFinite(minutes) ||
+		!AUTO_SYNC_INTERVAL_OPTIONS.includes(minutes as AutoSyncIntervalOption)
+	) {
 		return DEFAULT_AUTO_SYNC_INTERVAL_MINUTES;
 	}
 
 	return minutes;
 }
 
-type AutoSyncIntervalOption = typeof AUTO_SYNC_INTERVAL_OPTIONS[number];
+type AutoSyncIntervalOption = (typeof AUTO_SYNC_INTERVAL_OPTIONS)[number];
 
 function shouldTrackLocalChange(path: string, oldPath?: string): boolean {
 	if (oldPath !== undefined) {

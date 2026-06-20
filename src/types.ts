@@ -8,12 +8,15 @@ export interface UgreenSyncSettings {
 	remoteBaseDir: string;
 	autoSyncEnabled: boolean;
 	autoSyncIntervalMinutes: number;
+	autoSyncManualBlockReason?: AutoSyncManualBlockReason;
 	hasPendingChanges: boolean;
 	lastLocalChangeAt: number;
 	debugLogging: boolean;
 	syncState: Record<string, SyncStateEntry>;
 	lastSyncAt: number;
 }
+
+export type AutoSyncManualBlockReason = 'keep-both-conflict-resolution';
 
 export interface SyncStateEntry {
 	localMtime: number;
@@ -30,6 +33,7 @@ export const DEFAULT_SETTINGS: UgreenSyncSettings = {
 	remoteBaseDir: '',
 	autoSyncEnabled: false,
 	autoSyncIntervalMinutes: 15,
+	autoSyncManualBlockReason: undefined,
 	hasPendingChanges: false,
 	lastLocalChangeAt: 0,
 	debugLogging: false,
