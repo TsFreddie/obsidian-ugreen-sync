@@ -171,6 +171,15 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName('Conflict resolver')
+			.setDesc('Review files in .conflicts and choose which versions to keep.')
+			.addButton((button) =>
+				button.setButtonText('Resolve conflicts').onClick(() => {
+					void this.plugin.resolveConflicts();
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName('Sync history')
 			.setDesc(
 				this.plugin.settings.lastSyncAt === 0

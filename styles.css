@@ -1,1 +1,130 @@
-/* The plugin currently uses native Obsidian settings styles only. */
+.ugreen-sync-conflict-ribbon {
+	color: var(--text-error);
+}
+
+.ugreen-sync-modal-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-4-2);
+	flex: 0 0 auto;
+	margin-top: var(--size-4-4);
+}
+
+.ugreen-sync-conflict-modal {
+	width: min(90vw, 920px);
+}
+
+.ugreen-sync-conflict-content {
+	display: flex;
+	flex-direction: column;
+	height: min(82vh, 780px);
+	min-height: 0;
+}
+
+.ugreen-sync-conflict-file-label {
+	flex: 0 0 auto;
+}
+
+.ugreen-sync-conflict-tabs {
+	display: none;
+}
+
+.ugreen-sync-conflict-tab {
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	flex: 1 1 0;
+	font-weight: var(--font-medium);
+	min-height: 40px;
+}
+
+.ugreen-sync-conflict-tab.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.ugreen-sync-conflict-columns {
+	display: grid;
+	flex: 1 1 auto;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--size-4-4);
+	min-height: 0;
+}
+
+.ugreen-sync-conflict-column {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-4-2);
+	min-height: 0;
+	padding: var(--size-4-3);
+	min-width: 0;
+	overflow: hidden;
+}
+
+.ugreen-sync-conflict-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+}
+
+.ugreen-sync-conflict-header h3 {
+	margin: 0;
+}
+
+.ugreen-sync-conflict-badge {
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	padding: 2px 8px;
+	white-space: nowrap;
+}
+
+.ugreen-sync-conflict-time {
+	color: var(--text-faint);
+	flex: 0 0 auto;
+	font-size: var(--font-ui-small);
+	margin-top: calc(var(--size-4-2) * -1);
+}
+
+.ugreen-sync-conflict-preview {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	padding: var(--size-4-2);
+}
+
+.ugreen-sync-conflict-preview a {
+	pointer-events: none;
+}
+
+@media (max-width: 700px) {
+	.ugreen-sync-conflict-tabs {
+		background: var(--background-modifier-border);
+		border: 1px solid var(--background-modifier-border);
+		border-radius: var(--radius-m);
+		display: flex;
+		flex: 0 0 auto;
+		overflow: hidden;
+	}
+
+	.ugreen-sync-conflict-tab:not(.is-active) {
+		background: var(--background-secondary);
+		color: var(--text-muted);
+	}
+
+	.ugreen-sync-conflict-columns {
+		grid-template-columns: 1fr;
+	}
+
+	.ugreen-sync-conflict-column {
+		display: none;
+	}
+
+	.ugreen-sync-conflict-column.is-active {
+		display: flex;
+	}
+}

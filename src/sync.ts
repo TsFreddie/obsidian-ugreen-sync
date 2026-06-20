@@ -14,10 +14,9 @@ import {
 	UgreenSyncSettings,
 } from './types';
 import { debugLog } from './debug';
+import { CONFLICTS_FOLDER } from './constants';
 
 const MTIME_TOLERANCE_MS = 2000;
-const PLUGIN_ID = 'obsidian-ugreen-sync';
-const CONFLICTS_FOLDER = '.conflicts';
 
 export async function runSync(vault: Vault, settings: UgreenSyncSettings): Promise<SyncResult> {
 	await ensureNoUnresolvedConflicts(vault);
@@ -199,7 +198,7 @@ async function listLocalFiles(
 ): Promise<Map<string, LocalFileMeta>> {
 	const files = new Map<string, LocalFileMeta>();
 	for (const file of vault.getFiles()) {
-		if (!(file instanceof TFile) || !shouldSyncLocalFile(vault, file.path, settings.localFolders)) {
+		if (!(file instanceof TFile) || !shouldSyncLocalFile(file.path, settings.localFolders)) {
 			if (file instanceof TFile) {
 				debugLog(settings, 'local index skip', { path: file.path });
 			}
@@ -253,9 +252,28 @@ function getConflictPath(path: string): string {
 }
 
 async function ensureNoUnresolvedConflicts(vault: Vault): Promise<void> {
-	if (await vault.adapter.exists(CONFLICTS_FOLDER)) {
+	if (await hasConflictFiles(vault, CONFLICTS_FOLDER)) {
 		throw new Error('Unresolved sync conflicts exist in .conflicts. Resolve them before syncing again.');
 	}
+}
+
+async function hasConflictFiles(vault: Vault, folderPath: string): Promise<boolean> {
+	if (!(await vault.adapter.exists(folderPath))) {
+		return false;
+	}
+
+	const listed = await vault.adapter.list(folderPath);
+	if (listed.files.length > 0) {
+		return true;
+	}
+
+	for (const folder of listed.folders) {
+		if (await hasConflictFiles(vault, folder)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 function hasLocalChanged(local: LocalFileMeta, previous: SyncStateEntry): boolean {
@@ -303,10 +321,6 @@ function isInScope(path: string, localFolders: string[]): boolean {
 	});
 }
 
-function shouldSyncLocalFile(vault: Vault, path: string, localFolders: string[]): boolean {
-	const privatePluginPath = `${vault.configDir}/plugins/${PLUGIN_ID}/`;
-	if (path.startsWith(privatePluginPath)) {
-		return false;
-	}
+function shouldSyncLocalFile(path: string, localFolders: string[]): boolean {
 	return isInScope(path, localFolders);
 }
