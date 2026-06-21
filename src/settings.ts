@@ -36,6 +36,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 	private autoSyncIntervalDropdown?: DropdownComponent;
 	private autoSyncToggle?: ToggleComponent;
 	private nasDirBlockWarningEl?: HTMLElement;
+	private syncNowButton?: ButtonComponent;
 
 	constructor(app: App, plugin: UgreenSyncPlugin) {
 		super(app, plugin);
@@ -47,6 +48,7 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		this.autoSyncIntervalDropdown = undefined;
 		this.autoSyncToggle = undefined;
+		this.syncNowButton = undefined;
 
 		const connectionCard = this.createSection(containerEl).cardEl;
 
@@ -185,13 +187,19 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 			.setName(t('settings.manualSync'))
 			.setDesc(t('settings.manualSyncDesc'))
 			.addButton((button) => {
+				this.syncNowButton = button;
 				actionButtons.push(button.buttonEl);
 				button.buttonEl.disabled = !actionsEnabled;
 				button
-					.setButtonText(t('menu.syncNow'))
+					.setButtonText(t('settings.syncNowButton'))
 					.setCta()
-					.onClick(() => {
-						void this.plugin.syncNow();
+					.onClick(async () => {
+						this.setSyncButtonState(true);
+						try {
+							await this.plugin.syncNow();
+						} finally {
+							this.setSyncButtonState(false);
+						}
 					});
 			});
 
@@ -252,9 +260,24 @@ export class UgreenSyncSettingTab extends PluginSettingTab {
 	}
 
 	refreshAfterSync(): void {
+		this.setSyncButtonState(false);
 		this.updateNasDirBlockWarning();
 		if (this.containerEl.isConnected) {
 			this.display();
+		}
+	}
+
+	private setSyncButtonState(syncing: boolean): void {
+		if (this.syncNowButton === undefined) {
+			return;
+		}
+		this.syncNowButton.setDisabled(syncing);
+		if (syncing) {
+			this.syncNowButton.setButtonText(t('settings.syncingButton'));
+			this.syncNowButton.buttonEl.removeClass('mod-cta');
+		} else {
+			this.syncNowButton.setButtonText(t('settings.syncNowButton'));
+			this.syncNowButton.setCta();
 		}
 	}
 

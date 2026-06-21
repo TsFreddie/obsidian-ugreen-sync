@@ -84,6 +84,8 @@
     "actions": "操作",
     "manualSync": "手动同步",
     "manualSyncDesc": "立即执行一次同步操作。",
+    "syncNowButton": "立即同步",
+    "syncingButton": "同步中...",
     "conflictResolver": "冲突处理",
     "conflictResolverDesc": "冲突文件存储在 .conflicts 中。您可以点击解决冲突来处理它们，或手动清空 .conflicts 文件夹。",
     "resolveConflicts": "解决冲突",

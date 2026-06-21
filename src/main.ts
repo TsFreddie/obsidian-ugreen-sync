@@ -596,28 +596,55 @@ this.setSignedInIdleStatus(t('status.loggedIn'));
 				);
 			}),
 		);
-		this.registerDomEvent(activeDocument, 'visibilitychange', () => {
-			if (
-				activeDocument.visibilityState === 'hidden' &&
-				this.settings.hasPendingChanges
-			) {
-				void this.runAutoSync('visibility change', {
-					requirePendingChanges: true,
-				});
-			}
-		});
-		this.registerDomEvent(activeWindow, 'pagehide', () => {
-			if (!this.settings.autoSyncEnabled || !this.settings.hasPendingChanges) {
+
+		if (!Platform.isMobile) {
+			return;
+		}
+
+		try {
+			const w = window as unknown as { Capacitor?: unknown };
+			const capacitor = w.Capacitor as Record<string, unknown> | undefined;
+			if (typeof capacitor !== 'object' || capacitor === null) {
 				return;
 			}
-			void this.syncNow({
-				showInfoNotices: false,
-				showSuccessNotice: false,
-				allowLoginPrompt: false,
-				promptOnConflicts: false,
-				clearAutoSyncManualBlock: false,
-			});
-		});
+			const plugins = capacitor.Plugins as Record<string, unknown> | undefined;
+			if (typeof plugins !== 'object' || plugins === null) {
+				return;
+			}
+			const app = plugins.App as Record<string, unknown> | undefined;
+			if (typeof app !== 'object' || app === null) {
+				return;
+			}
+			const addListener = app.addListener as
+				| ((event: string, cb: () => void) => Promise<CapacitorAppListener>)
+				| undefined;
+			if (typeof addListener !== 'function') {
+				return;
+			}
+
+			const onPause = () => {
+				if (!this.settings.autoSyncEnabled || !this.settings.hasPendingChanges) {
+					return;
+				}
+				void this.syncNow({
+					showInfoNotices: false,
+					showSuccessNotice: false,
+					allowLoginPrompt: false,
+					promptOnConflicts: false,
+					clearAutoSyncManualBlock: false,
+				});
+			};
+
+			addListener('pause', onPause)
+				.then((listener) => {
+					if (listener?.remove) {
+						this.register(() => listener.remove());
+					}
+				})
+				.catch(() => {});
+		} catch {
+			// Capacitor not available, ignore
+		}
 	}
 
 	private configureAutoSyncInterval(): void {
@@ -1144,7 +1171,11 @@ this.setSignedInIdleStatus(t('status.loggedIn'));
 
 type SyncStatusKind = 'running' | 'warning' | 'success' | 'error' | 'blocked' | 'setup';
 
-type AutoSyncSource = 'launch' | 'quit' | 'visibility change' | 'interval';
+type AutoSyncSource = 'launch' | 'interval';
+
+interface CapacitorAppListener {
+	remove(): void;
+}
 
 interface AutoSyncOptions {
 	requirePendingChanges?: boolean;

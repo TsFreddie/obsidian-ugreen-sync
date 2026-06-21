@@ -84,6 +84,8 @@
     "actions": "Actions",
     "manualSync": "Manual sync",
     "manualSyncDesc": "Run a sync operation immediately.",
+    "syncNowButton": "Sync now",
+    "syncingButton": "Syncing...",
     "conflictResolver": "Conflict resolver",
     "conflictResolverDesc": "Conflicted files are stored in .conflicts. You can resolve them using the resolver, or manually clear out the .conflicts folder.",
     "resolveConflicts": "Resolve conflicts",
