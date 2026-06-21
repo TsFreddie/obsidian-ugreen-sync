@@ -12,6 +12,7 @@ import type UgreenSyncPlugin from './main';
 import { RemoteDirectoryPickerModal } from './remote-browser';
 import { formatUgreenError, getRemoteBaseDirAccessError, prepareAuthenticatedUgreenClient } from './ugreen';
 import { t } from './i18n';
+import { makeModalKeyboardAware } from './mobile-keyboard';
 
 const REMOTE_BASE_DIR_CHECK_DEBOUNCE_MS = 600;
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
@@ -373,6 +374,7 @@ class ResetHistoryConfirmModal extends Modal {
 
 	onOpen() {
 		this.modalEl.addClass('ugreen-sync-reset-history-modal');
+		makeModalKeyboardAware(this);
 		this.setTitle(t('modal.resetHistoryTitle'));
 		this.contentEl.empty();
 
@@ -415,6 +417,7 @@ class LogoutConfirmModal extends Modal {
 
 	onOpen() {
 		this.modalEl.addClass('ugreen-sync-reset-history-modal');
+		makeModalKeyboardAware(this);
 		this.setTitle(t('modal.logoutTitle'));
 		this.contentEl.empty();
 

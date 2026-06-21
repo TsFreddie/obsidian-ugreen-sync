@@ -5,6 +5,7 @@ import { debugLog } from './debug';
 import { createUgreenClient, formatLoginResultError, formatUgreenError } from './ugreen';
 import type { UgreenSyncSettings } from './types';
 import { t } from './i18n';
+import { makeModalKeyboardAware } from './mobile-keyboard';
 
 type UgosLoginCodeRequiredResult = Extract<UgosLoginResult, { requiresCode: true }>;
 type Protocol = 'ugreenlink' | 'https' | 'http';
@@ -73,6 +74,7 @@ class UgreenLoginModal extends Modal {
 			protocol: this.draft.protocol,
 		});
 		this.modalEl.classList.add('ugreen-sync-login-modal');
+		makeModalKeyboardAware(this);
 		this.render();
 	}
 
@@ -346,7 +348,10 @@ function deriveProtocol(url: string, ugreenLinkId: string): Protocol {
 	if (url.trim().toLowerCase().startsWith('http://')) {
 		return 'http';
 	}
-	return 'https';
+	if (url.trim().toLowerCase().startsWith('https://')) {
+		return 'https';
+	}
+	return 'ugreenlink';
 }
 
 function deriveHost(protocol: Protocol, url: string, ugreenLinkId: string): string {

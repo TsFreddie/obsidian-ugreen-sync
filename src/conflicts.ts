@@ -1,6 +1,7 @@
 import { App, ButtonComponent, Component, MarkdownRenderer, Modal, Notice, Vault, normalizePath } from 'obsidian';
 import { CONFLICTS_FOLDER } from './constants';
 import { t } from './i18n';
+import { makeModalKeyboardAware } from './mobile-keyboard';
 
 type ConflictChoice = 'workspace' | 'conflict' | 'both';
 type ConflictSide = 'workspace' | 'conflict';
@@ -225,6 +226,7 @@ class ConflictPromptModal extends Modal {
 
 	onOpen(): void {
 		this.setTitle(t('conflicts.title'));
+		makeModalKeyboardAware(this);
 		this.contentEl.empty();
 		this.contentEl.createEl('p', {
 			text: t('conflicts.conflictPromptLine1'),
@@ -266,6 +268,7 @@ class ConflictResolverModal extends Modal {
 
 	onOpen(): void {
 		this.modalEl.classList.add('ugreen-sync-conflict-modal');
+		makeModalKeyboardAware(this);
 		void this.renderCurrent();
 	}
 

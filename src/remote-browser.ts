@@ -1,6 +1,7 @@
 import { App, Modal, Setting, normalizePath } from 'obsidian';
 import type { UgosClient, UgosDirent } from 'ug-file';
 import { t } from './i18n';
+import { makeModalKeyboardAware } from './mobile-keyboard';
 
 const DIRECTORY_PAGE_LIMIT = 2000;
 
@@ -33,6 +34,7 @@ export class RemoteDirectoryPickerModal extends Modal {
 
 	onOpen(): void {
 		this.modalEl.addClass('ugreen-sync-browser-modal');
+		makeModalKeyboardAware(this);
 		this.render();
 	}
 
