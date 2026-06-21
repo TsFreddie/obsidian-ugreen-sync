@@ -23,6 +23,8 @@ import { debugLog } from './debug';
 import { CONFLICTS_FOLDER } from './constants';
 import { t } from './i18n';
 
+const MAX_SYNC_CONCURRENCY = 4;
+
 export async function runSync(
 	vault: Vault,
 	settings: UgreenSyncSettings,
@@ -61,31 +63,31 @@ export async function runSync(
 	const trashedRemotePaths: string[] = [];
 	const deletedLocalPaths: string[] = [];
 
-	for (const [index, path] of sortedPaths.entries()) {
-		const local = localFiles.get(path);
-		const remote = remoteFiles.get(path);
-		const previous = jobSettings.syncState[path];
+	const operationsByDepth = groupOperationsByDepth(sortedPaths, localFiles, remoteFiles, jobSettings);
 
-		try {
-			if (local !== undefined && remote !== undefined) {
-				debugLog(jobSettings, 'sync compare existing', { path, local, remote, previous });
-				await syncExistingFile(vault, jobSettings, client, local, remote, previous, result);
-				continue;
-			}
+	const depths = [...operationsByDepth.keys()].sort((a, b) => a - b);
+	let completedCount = 0;
 
-			if (local !== undefined) {
-				debugLog(jobSettings, 'sync local only', { path, local, previous });
-				await syncLocalOnlyFile(vault, jobSettings, client, local, previous, result, deletedLocalPaths);
-				continue;
+	for (const depth of depths) {
+		const ops = operationsByDepth.get(depth)!;
+		await runWithConcurrencyLimit(ops, MAX_SYNC_CONCURRENCY, async (op) => {
+			const { path, local, remote, previous } = op;
+			try {
+				if (local !== undefined && remote !== undefined) {
+					debugLog(jobSettings, 'sync compare existing', { path, local, remote, previous });
+					await syncExistingFile(vault, jobSettings, client, local, remote, previous, result);
+				} else if (local !== undefined) {
+					debugLog(jobSettings, 'sync local only', { path, local, previous });
+					await syncLocalOnlyFile(vault, jobSettings, client, local, previous, result, deletedLocalPaths);
+				} else if (remote !== undefined) {
+					debugLog(jobSettings, 'sync remote only', { path, remote, previous });
+					await syncRemoteOnlyFile(vault, jobSettings, client, remote, previous, result, trashedRemotePaths);
+				}
+			} finally {
+				completedCount += 1;
+				onProgress?.({ completed: completedCount, total: sortedPaths.length, path });
 			}
-
-			if (remote !== undefined) {
-				debugLog(jobSettings, 'sync remote only', { path, remote, previous });
-				await syncRemoteOnlyFile(vault, jobSettings, client, remote, previous, result, trashedRemotePaths);
-			}
-		} finally {
-			onProgress?.({ completed: index + 1, total: sortedPaths.length, path });
-		}
+		});
 	}
 
 	if (deletedLocalPaths.length > 0 || trashedRemotePaths.length > 0) {
@@ -103,6 +105,58 @@ export async function runSync(
 	debugLog(jobSettings, 'sync complete', { result });
 
 	return result;
+}
+
+interface SyncOperation {
+	path: string;
+	local: LocalFileMeta | undefined;
+	remote: RemoteFileMeta | undefined;
+	previous: SyncStateEntry | undefined;
+}
+
+function groupOperationsByDepth(
+	sortedPaths: string[],
+	localFiles: Map<string, LocalFileMeta>,
+	remoteFiles: Map<string, RemoteFileMeta>,
+	settings: UgreenSyncSettings,
+): Map<number, SyncOperation[]> {
+	const byDepth = new Map<number, SyncOperation[]>();
+	for (const path of sortedPaths) {
+		const depth = path.split('/').length - 1;
+		if (!byDepth.has(depth)) {
+			byDepth.set(depth, []);
+		}
+		byDepth.get(depth)!.push({
+			path,
+			local: localFiles.get(path),
+			remote: remoteFiles.get(path),
+			previous: settings.syncState[path],
+		});
+	}
+	return byDepth;
+}
+
+async function runWithConcurrencyLimit<T>(
+	items: T[],
+	limit: number,
+	fn: (item: T) => Promise<void>,
+): Promise<void> {
+	let index = 0;
+
+	const worker = async (): Promise<void> => {
+		for (;;) {
+			const current = index;
+			if (current >= items.length) {
+				break;
+			}
+			index = current + 1;
+			await fn(items[current]!);
+		}
+	};
+
+	const workerCount = Math.min(limit, items.length);
+	const workers = Array.from({ length: workerCount }, () => worker());
+	await Promise.all(workers);
 }
 
 async function syncExistingFile(
@@ -364,8 +418,14 @@ async function ensureLocalParent(vault: Vault, settings: UgreenSyncSettings, pat
 	for (const part of parts) {
 		current = current === '' ? part : `${current}/${part}`;
 		if (!(await vault.adapter.exists(current))) {
-			debugLog(settings, 'local folder create', { path: current });
-			await vault.adapter.mkdir(current);
+			try {
+				debugLog(settings, 'local folder create', { path: current });
+				await vault.adapter.mkdir(current);
+			} catch (error) {
+				if (!(await vault.adapter.exists(current))) {
+					throw error;
+				}
+			}
 		}
 	}
 }

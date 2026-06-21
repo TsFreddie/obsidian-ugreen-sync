@@ -12,6 +12,8 @@ type UgosLoginFailureResult = Extract<UgosLoginResult, { success: false; require
 const UGOS_FOLDER_ALREADY_EXISTS = 1327;
 const UGOS_PATH_NOT_FOUND = 1302;
 
+const MAX_REMOTE_LIST_CONCURRENCY = 6;
+
 const remoteFolderCache = new Set<string>();
 
 export function clearRemoteFolderCache(): void {
@@ -444,34 +446,54 @@ async function listRemoteFilesInDirectory(
 	directoryPath: string,
 	files: Map<string, RemoteFileMeta>,
 ): Promise<void> {
-	let page = 1;
-	const limit = 2000;
+	const pendingDirs: string[] = [directoryPath];
+	let dirIndex = 0;
 
-	while (true) {
-		debugLog(settings, 'remote list page', { path: directoryPath, page, limit });
-		const entries = await client.list(directoryPath, { page, limit });
-		debugLog(settings, 'remote list page result', {
-			path: directoryPath,
-			page,
-			entries: entries.length,
-		});
-		for (const entry of entries) {
-			if (entry.path === basePath || entry.path === `${basePath}/`) {
-				continue;
-			}
-			if (entry.isDirectory()) {
-				await listRemoteFilesInDirectory(client, settings, basePath, entry.path, files);
-			} else if (entry.isFile()) {
-				const file = direntToRemoteFile(entry, basePath);
-				debugLog(settings, 'remote file found', { file });
-				files.set(file.path, file);
-			}
-		}
+	while (dirIndex < pendingDirs.length) {
+		const batchStart = dirIndex;
+		const batchEnd = Math.min(dirIndex + MAX_REMOTE_LIST_CONCURRENCY, pendingDirs.length);
+		dirIndex = batchEnd;
 
-		if (entries.length < limit) {
-			break;
+		const results = await Promise.all(
+			pendingDirs.slice(batchStart, batchEnd).map(async (dirPath): Promise<string[]> => {
+				const subdirs: string[] = [];
+				let page = 1;
+				const limit = 2000;
+
+				while (true) {
+					debugLog(settings, 'remote list page', { path: dirPath, page, limit });
+					const entries = await client.list(dirPath, { page, limit });
+					debugLog(settings, 'remote list page result', {
+						path: dirPath,
+						page,
+						entries: entries.length,
+					});
+					for (const entry of entries) {
+						if (entry.path === basePath || entry.path === `${basePath}/`) {
+							continue;
+						}
+						if (entry.isDirectory()) {
+							subdirs.push(entry.path);
+						} else if (entry.isFile()) {
+							const file = direntToRemoteFile(entry, basePath);
+							debugLog(settings, 'remote file found', { file });
+							files.set(file.path, file);
+						}
+					}
+
+					if (entries.length < limit) {
+						break;
+					}
+					page += 1;
+				}
+
+				return subdirs;
+			}),
+		);
+
+		for (const subdirs of results) {
+			pendingDirs.push(...subdirs);
 		}
-		page += 1;
 	}
 }
 
