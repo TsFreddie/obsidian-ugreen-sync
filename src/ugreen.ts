@@ -10,6 +10,7 @@ type UgreenClientSettings = Pick<UgreenSyncSettings, 'url' | 'ugreenLinkId'>;
 type UgosLoginFailureResult = Extract<UgosLoginResult, { success: false; requiresCode: false }>;
 
 const UGOS_FOLDER_ALREADY_EXISTS = 1327;
+const UGOS_PATH_NOT_FOUND = 1302;
 
 const remoteFolderCache = new Set<string>();
 
@@ -497,7 +498,15 @@ async function mkdirIfMissing(
 	}
 
 	debugLog(settings, 'remote folder exists check', { path: remotePath });
-	if (await client.exists(remotePath)) {
+	let folderExists = false;
+	try {
+		folderExists = await client.exists(remotePath);
+	} catch (error) {
+		if (!(error instanceof UgosApiError && error.code === UGOS_PATH_NOT_FOUND)) {
+			throw error;
+		}
+	}
+	if (folderExists) {
 		debugLog(settings, 'remote folder exists', { path: remotePath });
 		remoteFolderCache.add(remotePath);
 		return;
