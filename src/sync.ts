@@ -492,7 +492,6 @@ function hasLocalChanged(local: LocalFileMeta, previous: SyncStateEntry): boolea
 export function hasRemoteChanged(remote: RemoteFileMeta, previous: SyncStateEntry): boolean {
 	return (
 		remote.size !== previous.size ||
-		remote.etag !== previous.etag ||
 		remote.mtime !== previous.remoteMtime
 	);
 }
