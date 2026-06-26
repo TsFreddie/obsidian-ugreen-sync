@@ -102,6 +102,13 @@ export async function runSync(
 		}
 	}
 
+	for (const path of Object.keys(nextState)) {
+		if (!localFiles.has(path) && !remoteFiles.has(path)) {
+			debugLog(jobSettings, 'sync state cleanup stale entry', { path });
+			delete nextState[path];
+		}
+	}
+
 	debugLog(jobSettings, 'sync complete', { result });
 
 	return result;
