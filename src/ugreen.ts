@@ -562,6 +562,9 @@ function direntToRemoteFile(entry: UgosDirent, basePath: string): RemoteFileMeta
 
 	return {
 		path: entry.path.slice(prefix.length),
+		// entry.mtime is in seconds (Ugreen NAS API); converted to ms for
+		// consistent comparison with local file mtime. This means remote
+		// change detection is limited to second-level granularity.
 		mtime: entry.mtime * 1000,
 		size: entry.size,
 		etag: `${entry.mtime}_${entry.name}`,

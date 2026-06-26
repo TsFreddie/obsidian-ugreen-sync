@@ -483,6 +483,11 @@ function hasLocalChanged(local: LocalFileMeta, previous: SyncStateEntry): boolea
 }
 
 export function hasRemoteChanged(remote: RemoteFileMeta, previous: SyncStateEntry): boolean {
+	// NOTE: remote mtime has second-level precision (see direntToRemoteFile).
+	// Two modifications of the same file within the same second will share the
+	// same mtime and will not be detected as a change by this comparison.
+	// This is inherent to the Ugreen NAS API; the size check mitigates this
+	// for same-second modifications that change file size.
 	return (
 		remote.size !== previous.size ||
 		remote.etag !== previous.etag ||
