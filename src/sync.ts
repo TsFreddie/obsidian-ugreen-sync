@@ -65,6 +65,8 @@ export async function runSync(
 
 	const operationsByDepth = groupOperationsByDepth(sortedPaths, localFiles, remoteFiles, jobSettings);
 
+	const dirLocks = new Map<string, Promise<void>>();
+
 	const depths = [...operationsByDepth.keys()].sort((a, b) => a - b);
 	let completedCount = 0;
 
@@ -75,13 +77,13 @@ export async function runSync(
 			try {
 				if (local !== undefined && remote !== undefined) {
 					debugLog(jobSettings, 'sync compare existing', { path, local, remote, previous });
-					await syncExistingFile(vault, jobSettings, client, local, remote, previous, result);
+					await syncExistingFile(vault, jobSettings, client, local, remote, previous, result, dirLocks);
 				} else if (local !== undefined) {
 					debugLog(jobSettings, 'sync local only', { path, local, previous });
 					await syncLocalOnlyFile(vault, jobSettings, client, local, previous, result, deletedLocalPaths);
 				} else if (remote !== undefined) {
 					debugLog(jobSettings, 'sync remote only', { path, remote, previous });
-					await syncRemoteOnlyFile(vault, jobSettings, client, remote, previous, result, trashedRemotePaths);
+					await syncRemoteOnlyFile(vault, jobSettings, client, remote, previous, result, trashedRemotePaths, dirLocks);
 				}
 			} finally {
 				completedCount += 1;
@@ -174,6 +176,7 @@ async function syncExistingFile(
 	remote: RemoteFileMeta,
 	previous: SyncStateEntry | undefined,
 	result: SyncResult,
+	dirLocks: Map<string, Promise<void>>,
 ): Promise<void> {
 	const localChanged = previous === undefined || hasLocalChanged(local, previous);
 	const remoteChanged = previous === undefined || hasRemoteChanged(remote, previous);
@@ -203,9 +206,9 @@ async function syncExistingFile(
 		}
 
 		debugLog(settings, 'sync decision conflict download remote', { path: local.path });
-		await createConflictCopy(vault, settings, local);
+		await createConflictCopy(vault, settings, local, dirLocks);
 		result.conflicts += 1;
-		await downloadAndRecord(vault, settings, client, remote, result);
+		await downloadAndRecord(vault, settings, client, remote, result, dirLocks);
 		return;
 	}
 
@@ -216,7 +219,7 @@ async function syncExistingFile(
 	}
 
 	debugLog(settings, 'sync decision download remote changed', { path: remote.path });
-	await downloadAndRecord(vault, settings, client, remote, result);
+	await downloadAndRecord(vault, settings, client, remote, result, dirLocks);
 }
 
 async function syncLocalOnlyFile(
@@ -249,6 +252,7 @@ async function syncRemoteOnlyFile(
 	previous: SyncStateEntry | undefined,
 	result: SyncResult,
 	trashedRemotePaths: string[],
+	dirLocks: Map<string, Promise<void>>,
 ): Promise<void> {
 	if (previous !== undefined && !hasRemoteChanged(remote, previous)) {
 		debugLog(settings, 'remote delete start', { path: remote.path, previous });
@@ -260,7 +264,7 @@ async function syncRemoteOnlyFile(
 		return;
 	}
 
-	await downloadAndRecord(vault, settings, client, remote, result);
+	await downloadAndRecord(vault, settings, client, remote, result, dirLocks);
 }
 
 function extractParentDirSet(filePaths: string[]): Set<string> {
@@ -380,8 +384,9 @@ async function downloadAndRecord(
 	client: Awaited<ReturnType<typeof prepareUgreenClient>>,
 	remote: RemoteFileMeta,
 	result: SyncResult,
+	dirLocks: Map<string, Promise<void>>,
 ): Promise<void> {
-	await ensureLocalParent(vault, settings, remote.path);
+	await ensureLocalParent(vault, settings, remote.path, dirLocks);
 	const content = await downloadRemoteFile(client, settings, remote.path);
 	await writeDownloadedContentAndRecord(vault, settings, remote, content, result);
 }
@@ -418,28 +423,36 @@ async function listLocalFiles(
 	return files;
 }
 
-async function ensureLocalParent(vault: Vault, settings: UgreenSyncSettings, path: string): Promise<void> {
+async function ensureLocalParent(
+	vault: Vault,
+	settings: UgreenSyncSettings,
+	path: string,
+	dirLocks: Map<string, Promise<void>>,
+): Promise<void> {
 	const parts = path.split('/');
 	parts.pop();
 	let current = '';
 	for (const part of parts) {
 		current = current === '' ? part : `${current}/${part}`;
-		if (!(await vault.adapter.exists(current))) {
-			try {
+		const existing = dirLocks.get(current);
+		if (existing !== undefined) {
+			await existing;
+			continue;
+		}
+		const lock = (async () => {
+			if (!(await vault.adapter.exists(current))) {
 				debugLog(settings, 'local folder create', { path: current });
 				await vault.adapter.mkdir(current);
-			} catch (error) {
-				if (!(await vault.adapter.exists(current))) {
-					throw error;
-				}
 			}
-		}
+		})();
+		dirLocks.set(current, lock);
+		await lock;
 	}
 }
 
-async function createConflictCopy(vault: Vault, settings: UgreenSyncSettings, local: LocalFileMeta): Promise<void> {
+async function createConflictCopy(vault: Vault, settings: UgreenSyncSettings, local: LocalFileMeta, dirLocks: Map<string, Promise<void>>): Promise<void> {
 	const conflictPath = getConflictPath(local.path);
-	await ensureLocalParent(vault, settings, conflictPath);
+	await ensureLocalParent(vault, settings, conflictPath, dirLocks);
 	const content = await vault.adapter.readBinary(local.path);
 	const options = { mtime: local.mtime };
 	debugLog(settings, 'local conflict copy start', { path: local.path, conflictPath, options });
