@@ -5,14 +5,21 @@ let vaultAdapter: Vault['adapter'] | null = null;
 let logFilePath = '';
 let debugEnabled = false;
 
-export function initFileLogger(adapter: Vault['adapter'], path: string): void {
+export function initFileLogger(adapter: Vault['adapter'], path: string, enabled: boolean): void {
 	vaultAdapter = adapter;
 	logFilePath = path;
+	if (enabled && vaultAdapter) {
+		void vaultAdapter.write(logFilePath, '').catch(() => {});
+	}
 }
 
 /** Set the global debug flag. Call this whenever settings.debugLogging changes. */
 export function setDebugEnabled(enabled: boolean): void {
+	const wasEnabled = debugEnabled;
 	debugEnabled = enabled;
+	if (!wasEnabled && enabled && vaultAdapter && logFilePath) {
+		void vaultAdapter.write(logFilePath, '').catch(() => {});
+	}
 }
 
 /** Check whether debug logging is currently active (for use in the fetch wrapper). */
@@ -25,9 +32,7 @@ async function appendToLogFile(line: string): Promise<void> {
 		return;
 	}
 	try {
-		const exists = await vaultAdapter.exists(logFilePath);
-		const content = exists ? await vaultAdapter.read(logFilePath) : '';
-		await vaultAdapter.write(logFilePath, content + line);
+		await vaultAdapter.append(logFilePath, line);
 	} catch {
 		// Silently ignore write failures to avoid cascading errors
 	}

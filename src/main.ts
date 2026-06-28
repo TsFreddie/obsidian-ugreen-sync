@@ -63,7 +63,7 @@ export default class UgreenSyncPlugin extends Plugin {
 		this.manifest.name = t('plugin.name');
 
 		const logPath = `${this.app.vault.configDir}/plugins/obsidian-ugreen-sync/ugreen-sync.log`;
-		initFileLogger(this.app.vault.adapter, logPath);
+		initFileLogger(this.app.vault.adapter, logPath, this.settings.debugLogging);
 		setDebugEnabled(this.settings.debugLogging);
 
 		this.statusBarItem = this.addStatusBarItem();
