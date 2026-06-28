@@ -32,7 +32,7 @@ import {
 	openConflictPrompt,
 	openConflictResolver,
 } from './conflicts';
-import { debugLog } from './debug';
+import { debugLog, initFileLogger, setDebugEnabled } from './debug';
 import { CONFLICTS_FOLDER } from './constants';
 import { t, setLocale, detectLocale } from './i18n';
 
@@ -61,6 +61,10 @@ export default class UgreenSyncPlugin extends Plugin {
 		await this.loadSettings();
 		setLocale(detectLocale(getLanguage()));
 		this.manifest.name = t('plugin.name');
+
+		const logPath = `${this.app.vault.configDir}/plugins/obsidian-ugreen-sync/ugreen-sync.log`;
+		initFileLogger(this.app.vault.adapter, logPath, this.settings.debugLogging);
+		setDebugEnabled(this.settings.debugLogging);
 
 		this.statusBarItem = this.addStatusBarItem();
 		this.statusBarItem.addClass('ugreen-sync-status-bar');
@@ -588,6 +592,7 @@ this.setSignedInIdleStatus(t('status.loggedIn'));
 	}
 
 	async saveSettings() {
+		setDebugEnabled(this.settings.debugLogging);
 		await this.saveData({
 			url: this.settings.url,
 			ugreenLinkId: this.settings.ugreenLinkId,

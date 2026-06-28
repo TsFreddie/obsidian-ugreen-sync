@@ -3,7 +3,7 @@ import type { RequestUrlParam, RequestUrlResponse } from 'obsidian';
 import { UgosApiError, UgosClient, UgosHttpError } from 'ug-file';
 import type { ConflictAction, SessionContainer, UgosDirent, UgosLoginResult, UgosRoot } from 'ug-file';
 import { UgreenSyncSettings, RemoteFileMeta } from './types';
-import { debugLog } from './debug';
+import { debugLog, logError } from './debug';
 import { t } from './i18n';
 
 type UgreenClientSettings = Pick<UgreenSyncSettings, 'url' | 'ugreenLinkId'>;
@@ -655,7 +655,7 @@ const fetchAdapter: typeof fetch = async (input, init): Promise<Response> => {
 	try {
 		response = await requestUrl(request);
 	} catch (error) {
-		console.error('[UGREEN Sync] transport request failed', {
+		logError('transport request failed', `${request.method ?? 'GET'} ${sanitizeUrl(request.url)}`, {
 			method: request.method ?? 'GET',
 			url: sanitizeUrl(request.url),
 			contentType: request.contentType,
